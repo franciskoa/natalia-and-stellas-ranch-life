@@ -32,20 +32,26 @@ const WALKING = {
 // ---------------------------------------------------------------------------
 // How a horse handles. Roughly 2.4x Natalia's walking speed, which is what
 // makes the ride from the house to the barn feel like a proper gallop.
+//
+// The SPEED is not in here: each kind of horse has its own, and it comes from
+// horse.userData.speed (see HORSE_KINDS in horse.js). Everything in this table
+// is the same whichever horse she is on.
 // ---------------------------------------------------------------------------
 const RIDING = {
-  speed: 11,            // units per second
   turnSpeed: 6,         // a horse swings round more slowly than a girl
-  cameraDistance: 10,   // further back, because the horse is big
-  cameraHeight: 2.2,    // and higher up, so we look over its head
+  cameraHeight: 2.2,    // higher up than on foot, so we look over its head
   collisionRadius: 1.2, // a horse is wide: stop further from the walls
 };
 
-// How high above the horse's feet Natalia sits.
-// The horse's barrel (horse.js) is centred at y = 1.6 and is 0.85 tall, so its
-// back is at y = 2.025. Natalia's hip joints are 0.62 above her own feet, so
-// 1.6 puts her hips at 2.22 - just clear of the back, like a saddle.
-const SADDLE_Y = 1.6;
+// How far back the camera sits while riding a normal-sized horse, and the
+// closest it is ever allowed to get. A pony is smaller, so the camera comes in
+// a little: 10 * 0.75 is 7.5, which the minimum lifts back to 8.
+const RIDING_CAMERA_DISTANCE = 10;
+const MIN_RIDING_CAMERA_DISTANCE = 8;
+
+// Natalia's seat height is NOT a constant any more: a pony's back is lower
+// than a chestnut's, and a saddle lifts her a little. horse.js works the
+// number out per horse and publishes it as horse.userData.saddleY.
 
 // How far to the side of the horse she lands when she gets off, and how far
 // behind it she lands if both sides are up against a wall.
@@ -90,17 +96,33 @@ export function createRiding({ natalia, stella, controls, interactions, scene })
     if (natalia.userData.setSitting) natalia.userData.setSitting(true);
 
     // Sit her on the horse's back. Once she is a child of the horse, her
-    // position and rotation are measured FROM the horse, so (0, SADDLE_Y, 0)
+    // position and rotation are measured FROM the horse, so (0, saddleY, 0)
     // means "right on its back" and rotation.y = 0 means "facing the same way
     // as the horse" - and the horse's head is its +Z, the same forward the
     // girls use.
-    natalia.position.set(0, SADDLE_Y, 0);
+    //
+    // saddleY comes from the horse itself, because a pony's back is lower than
+    // a big black horse's, and a saddle lifts her a touch higher again. The
+    // horse group is never scaled (only the animal inside it is), so she stays
+    // her own size even on the pony.
+    const saddleY = horse.userData.saddleY ?? 1.6;
+    natalia.position.set(0, saddleY, 0);
     natalia.rotation.y = 0;
     horse.add(natalia);
 
-    // Hand the keyboard and the camera over to the horse. Adding the horse to
-    // the subject config here keeps all the handling numbers in one place.
-    controls.setSubject({ object: horse, ...RIDING });
+    // Hand the keyboard and the camera over to the horse. This horse's own
+    // speed comes along too, so a white horse really does feel faster than a
+    // pony, and the camera pulls back a bit less for a smaller horse.
+    const scale = horse.userData.scale ?? 1;
+    controls.setSubject({
+      object: horse,
+      ...RIDING,
+      speed: horse.userData.speed ?? 11,
+      cameraDistance: Math.max(
+        MIN_RIDING_CAMERA_DISTANCE,
+        RIDING_CAMERA_DISTANCE * scale
+      ),
+    });
 
     // Measure "am I close enough to press E?" from the horse from now on. The
     // horse she is sitting on is zero units away, so it always wins, and its E
@@ -150,9 +172,12 @@ export function createRiding({ natalia, stella, controls, interactions, scene })
       },
     ];
 
-    // Is this spot clear of the house, the barn and the edge of the ranch?
-    // controls.js owns those shapes, so it is the one we ask.
-    const isFree = (spot) => controls.isSpotFree(spot.x, spot.z, NATALIA_RADIUS);
+    // Is this spot clear of the house, the barn, the edge of the ranch AND the
+    // other horses standing about? controls.js owns all of those shapes, so it
+    // is the one we ask. We tell it to ignore the horse she is climbing off:
+    // she is meant to land right beside that one.
+    const isFree = (spot) =>
+      controls.isSpotFree(spot.x, spot.z, NATALIA_RADIUS, dismountedFrom);
 
     // Is Stella standing in the way?
     const stellaIsThere = (spot) =>
@@ -165,7 +190,11 @@ export function createRiding({ natalia, stella, controls, interactions, scene })
     if (!spot) spot = candidates.find(isFree);
     // Last resort (boxed in on every side): take the first spot and shove it
     // out of whatever it is stuck in, so she never ends up inside a wall.
-    if (!spot) spot = controls.resolveSpot(candidates[0].x, candidates[0].z, NATALIA_RADIUS);
+    if (!spot) {
+      spot = controls.resolveSpot(
+        candidates[0].x, candidates[0].z, NATALIA_RADIUS, dismountedFrom
+      );
+    }
 
     // Put her back in the scene as her own object. scene.add() takes her off
     // the horse for us, and from here her position is a world position again.

@@ -6,6 +6,11 @@
 // walk up and press F to feed it.
 // Phase 3: press E next to a horse to climb on, gallop about, and press E again
 // to hop off.
+// Phase 4: three horses of different kinds, each with its own speed, size and
+// appetite, and each able to wear its own saddle and blanket - press E at the
+// barn door to open the barn menu and dress them up. The whole ranch is saved
+// into the browser, so closing the tab and coming back finds everything where
+// it was left.
 
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
@@ -14,10 +19,51 @@ import { createControls } from './controls.js';
 import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
 import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
+import { createBarnMenu } from './menu.js';
+import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
 // white before Three.js starts drawing.
 const SKY_COLOR = 0x87ceeb;
+
+// ---------------------------------------------------------------------------
+// The horses the ranch starts with: which kind each one is, what it is called
+// and where it stands. They are all near the barn and the water trough (which
+// is at x 11, z -1) with plenty of room between them, so nobody is standing
+// inside anything.
+//
+// This is deliberately plain data - no Three.js objects - so that the saving
+// code can use it as "what a brand new game looks like" and can write the same
+// shape back out into localStorage.
+//
+//   id        a short name the save file uses to match a saved horse to this one
+//   kind      a key of HORSE_KINDS in horse.js
+//   position  where it stands; y is 0 because horses stand on the grass
+//   rotationY which way it is turned, in radians (0 faces +Z)
+// ---------------------------------------------------------------------------
+export const STARTING_HORSES = [
+  {
+    id: 'h1',
+    name: 'Biscuit',
+    kind: 'chestnut',
+    position: { x: 6, y: 0, z: 4 },
+    rotationY: -0.35,
+  },
+  {
+    id: 'h2',
+    name: 'Snowy',
+    kind: 'white',
+    position: { x: 12, y: 0, z: 2 },
+    rotationY: 0.6,
+  },
+  {
+    id: 'h3',
+    name: 'Coco',
+    kind: 'pony',
+    position: { x: 16, y: 0, z: 6 },
+    rotationY: -1.2,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Renderer - the thing that actually draws pixels into a <canvas>.
@@ -65,20 +111,15 @@ scene.add(sunLight);
 const world = buildWorld(scene);
 
 // ---------------------------------------------------------------------------
-// The horses. There is just one for now, but they live in an array so Phase 4
-// can add a whole field of them without changing the game loop.
-// The spot (6, 4) matches the round "you cannot walk through me" area that
-// controls.js already keeps the player out of.
+// The horses. One per entry in STARTING_HORSES above; the game loop and the
+// interaction code below just walk the list, so adding a fourth horse is a
+// matter of adding a fourth line to that array.
 // ---------------------------------------------------------------------------
-const horse = createHorse({
-  name: 'Biscuit',
-  coatColor: 0x9c6b3a, // chestnut brown
-  position: new THREE.Vector3(6, 0, 4),
-  rotationY: -0.35,    // turned a little so it looks towards the camera
+const horses = STARTING_HORSES.map((spec) => {
+  const h = createHorse(spec);
+  scene.add(h);
+  return h;
 });
-scene.add(horse);
-
-const horses = [horse];
 
 // ---------------------------------------------------------------------------
 // The girls. Both stand in the yard in front of the house and the barn, which
@@ -106,8 +147,11 @@ const controls = createControls(natalia, camera, renderer.domElement, world.boun
 // from the horse's own position each frame, so once a horse has been ridden to
 // a new spot the no-go area is there too, not back where it started.
 // (A horse never bumps into itself while it is the one being ridden.)
+// A small horse gets a small circle, so you can stand closer to the pony.
 const HORSE_BLOCK_RADIUS = 1.6;
-for (const h of horses) controls.addObstacle(h, HORSE_BLOCK_RADIUS);
+for (const h of horses) {
+  controls.addObstacle(h, HORSE_BLOCK_RADIUS * h.userData.scale);
+}
 
 // ---------------------------------------------------------------------------
 // Interactions: walk up to something and press a key. The system itself lives
@@ -130,6 +174,96 @@ const interactions = createInteractions(
 // ---------------------------------------------------------------------------
 const riding = createRiding({ natalia, stella, controls, interactions, scene });
 
+// ---------------------------------------------------------------------------
+// SAVING AND LOADING
+//
+// save.js does the talking to the browser's storage; this section decides WHEN
+// we talk to it. The rule is: save whenever the player has done something they
+// would be sad to lose, plus a quiet autosave every few seconds for everything
+// else (walking about, horses getting hungry).
+//
+// Nothing here can throw: save.js wraps every storage call in try/catch, so a
+// browser with storage switched off just plays without a save file.
+// ---------------------------------------------------------------------------
+
+// The little "Saved" note in the top-right corner, and the timer that hides it.
+const savedElement = document.getElementById('saved');
+let savedHideTimer = 0;
+
+// Blink "Saved" for a second. Only the "the player just did something" saves
+// call this - the every-five-seconds autosave stays silent, because a note
+// blinking away in the corner forever would be annoying rather than reassuring.
+function flashSaved() {
+  if (!savedElement) return;
+  savedElement.classList.add('visible');
+  clearTimeout(savedHideTimer);
+  savedHideTimer = setTimeout(() => savedElement.classList.remove('visible'), 1000);
+}
+
+// Set to true by "Start over": from that moment on nothing may write to
+// storage again, or the autosave (or the save on leaving the page, which the
+// reload itself sets off) would put the old ranch straight back.
+let savingStopped = false;
+
+// Which frame we last saved on. Several things can ask for a save in the same
+// frame - feeding a horse also nudges the autosave, say - and writing the same
+// blob three times over would be a waste.
+let frameNumber = 0;
+let lastSavedFrame = -1;
+
+// Seconds since the last autosave.
+let secondsSinceSave = 0;
+
+// save()        - write the ranch out, at most once per frame.
+// save(true)    - write it out even if we already saved this frame. The page
+//                 is closing, so this is our last chance and it must not be
+//                 skipped.
+function save(force = false) {
+  if (savingStopped) return;
+  if (!force && lastSavedFrame === frameNumber) return;
+
+  lastSavedFrame = frameNumber;
+  secondsSinceSave = 0;
+  saveGame(collectState({ natalia, horses }));
+}
+
+// The same save, with the "Saved" note: for the handful of moments the player
+// actually did something (dressing a horse, feeding it, getting on or off).
+function saveAndShow() {
+  save();
+  flashSaved();
+}
+
+// --- loading, once, before the first frame is drawn ------------------------
+// A brand new game (or a blocked/corrupted save) gets null back, and we simply
+// leave the world exactly as it was built above: the STARTING_HORSES layout,
+// no tack, full hunger bars.
+const saved = loadGame();
+if (saved) {
+  applyState(saved, { natalia, horses, controls, bounds: world.bounds });
+
+  // Bring Stella along: put her on her following spot behind her sister rather
+  // than leaving her to jog across the whole ranch on the first frame.
+  const behindX = natalia.position.x - Math.sin(natalia.rotation.y) * 1.6;
+  const behindZ = natalia.position.z - Math.cos(natalia.rotation.y) * 1.6;
+  const stellaSpot = controls.resolveSpot(behindX, behindZ, 0.35);
+  stella.position.set(stellaSpot.x, 0, stellaSpot.z);
+  stella.rotation.y = natalia.rotation.y;
+
+  // The camera was parked behind Natalia's starting spot while the world was
+  // being built. She has just moved, so put it straight behind her again
+  // instead of letting it swoop across the ranch on the first few frames.
+  controls.snapCamera();
+}
+
+// --- the moments we save on --------------------------------------------------
+// Closing the tab, or switching to another tab on a phone (where "hidden" is
+// often the last thing we hear before the browser throws the page away).
+window.addEventListener('beforeunload', () => save(true));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') save(true);
+});
+
 // Every horse is something Natalia can ride (E) and feed (F). The radius of 3
 // units is comfortably outside the 1.6-unit circle controls.js keeps her out
 // of, so there is a wide band where she is close enough but not stuck on it.
@@ -151,10 +285,14 @@ for (const h of horses) {
             if (riding.ridingHorse() === h) {
               riding.dismount();
               interactions.showMessage('Natalia hops off.');
+              // Where she got off - and where the horse ended up - is worth
+              // keeping straight away.
+              saveAndShow();
             }
           } else {
             riding.mount(h);
-            interactions.showMessage('Giddy up!');
+            interactions.showMessage(`Giddy up, ${name}!`);
+            saveAndShow();
           }
         },
       },
@@ -165,13 +303,78 @@ for (const h of horses) {
         getLabel: () => (isHungry(h) ? `Feed ${name}` : ''),
         onPress: () => {
           // Feeding from the saddle is allowed - she can lean down.
-          if (feedHorse(h)) interactions.showMessage(`Yum! ${name} is happy.`);
-          else interactions.showMessage(`${name} isn't hungry right now.`);
+          if (feedHorse(h)) {
+            interactions.showMessage(`Yum! ${name} is happy.`);
+            // A full hunger bar is worth remembering.
+            saveAndShow();
+          } else {
+            interactions.showMessage(`${name} isn't hungry right now.`);
+          }
         },
       },
     ],
   });
 }
+
+// ---------------------------------------------------------------------------
+// The barn menu: the panel of big buttons for choosing a horse and painting
+// its saddle and blanket. menu.js builds it out of ordinary HTML and hangs it
+// over the game.
+//
+// onChange runs after every colour change, so a new saddle is written to the
+// browser the instant it is chosen - even if the tab is closed the moment
+// after.
+//
+// onReset runs when the player has tapped "Start over" AND confirmed it. We
+// throw the save file away and reload the page, which is the simplest possible
+// "new ranch": the game builds itself from STARTING_HORSES again, with no tack
+// and full hunger bars. savingStopped makes sure nothing writes the old ranch
+// back out while the page is on its way down.
+// ---------------------------------------------------------------------------
+const barnMenu = createBarnMenu({
+  horses,
+  controls,
+  interactions,
+  onChange: () => saveAndShow(),
+  onReset: () => {
+    savingStopped = true;
+    clearSave();
+    location.reload();
+  },
+});
+
+// ---------------------------------------------------------------------------
+// The barn door. The barn stands at (14, 0, -10) and its door is on the front
+// (+Z) face, at about z = -6, so this marker sits a step out in front of it on
+// the grass.
+//
+// It is a bare THREE.Object3D: no shape and nothing to draw, just a spot in
+// the world for the interaction system to measure distances to. The barn's own
+// walls stop Natalia at z = -5.85, so a radius of 3.5 gives her a comfortable
+// patch of grass in front of the door where the prompt shows up.
+// ---------------------------------------------------------------------------
+const barnDoor = new THREE.Object3D();
+barnDoor.name = 'barnDoor';
+barnDoor.position.set(14, 0, -4.5);
+scene.add(barnDoor);
+
+interactions.register({
+  object: barnDoor,
+  radius: 3.5,
+  actions: [
+    {
+      key: 'KeyE',
+      // She has to be on her own two feet to go into the barn - you cannot
+      // ride a horse through the door.
+      getLabel: () =>
+        riding.isRiding() ? 'Get off your horse first' : 'Open the barn',
+      onPress: () => {
+        if (riding.isRiding()) return;   // the label already said why
+        barnMenu.open();
+      },
+    },
+  ],
+});
 
 // ---------------------------------------------------------------------------
 // Keep the picture the right shape when the window is resized.
@@ -188,7 +391,15 @@ window.addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
 
+// How often the quiet background autosave runs, in seconds. Everything the
+// player does on purpose saves at once anyway; this one is for the things that
+// just happen, like walking about and hunger bars dropping.
+const AUTOSAVE_SECONDS = 5;
+
 function update(dt) {
+  // 0. Count the frame, so save() can tell "already saved this frame" from
+  //    "saved a moment ago".
+  frameNumber++;
   // 1. Read the keys and the mouse: move whoever is being driven (Natalia on
   //    foot, or the horse she is riding), then place the camera.
   controls.update(dt);
@@ -209,8 +420,15 @@ function update(dt) {
     h.userData.setMoving(h === riddenHorse && controls.isMoving(), dt);
   }
   // 5. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
-  //    E and F.
+  //    E and F. While the barn menu is open this does nothing.
   interactions.update(dt);
+  // 6. The barn menu gets its frame too. It has nothing to animate today, but
+  //    calling it means this loop never has to change if that alters.
+  barnMenu.update(dt);
+  // 7. The quiet autosave. dt piles up until five seconds have gone by, then
+  //    the ranch is written out and the count starts again (save() resets it).
+  secondsSinceSave += dt;
+  if (secondsSinceSave >= AUTOSAVE_SECONDS) save();
 }
 
 function animate() {

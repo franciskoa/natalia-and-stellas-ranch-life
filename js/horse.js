@@ -1,15 +1,20 @@
-// horse.js - one horse: its body, its hunger, and the little bar floating
-// above its head.
+// horse.js - one horse: its body, its hunger, its tack (saddle and blanket)
+// and the little bar floating above its head.
 //
 // A horse is a THREE.Group whose origin sits on the ground between its hooves,
 // so horse.position.set(x, 0, z) always stands it flat on the grass. The model
 // looks along +Z, which means rotationY = 0 faces +Z.
 //
 // What this module gives the rest of the game:
-//   createHorse({ name, coatColor, position, rotationY })  -> the THREE.Group
+//   HORSE_KINDS                     - the table of horse breeds and their stats
+//   TACK_COLORS                     - the colours a saddle or blanket can be
+//   createHorse({ id, name, kind, position, rotationY, coatColor })
+//                                   -> the THREE.Group
 //   updateHorse(horse, dt, camera)  - call once per frame
 //   feedHorse(horse)                - fill the hunger bar up again
 //   isHungry(horse)                 - true while the bar is not full
+//   setSaddle(horse, colorKey)      - 'none' to take it off, or a TACK_COLORS key
+//   setBlanket(horse, colorKey)     - same idea, for the blanket underneath
 //
 // Each horse also carries its own little walk animation, the same idea as the
 // girls' setWalking in characters.js:
@@ -19,17 +24,97 @@
 //
 // The hunger number itself lives on the group, at horse.userData.hunger, and
 // runs from 100 (just fed) down to 0 (very hungry).
+//
+// ---------------------------------------------------------------------------
+// About SIZE (this is the one fiddly bit, so here it is in one place).
+//
+// Different kinds of horse are different sizes: a pony is three quarters the
+// size of a chestnut. We can NOT simply shrink the whole group, because while
+// Natalia is riding she is a CHILD of the horse group (see riding.js) - so
+// shrinking the group would shrink her too, and she would ride a pony as a
+// tiny doll.
+//
+// So the body is built at its normal size inside an inner group called
+// "frame", and only that inner group (plus the hunger bar) is scaled. Natalia
+// is added to the OUTER group, so she always stays her own size.
+//
+// Because the outer group is never scaled, anything measured from it is in
+// real world units, and two of those numbers are published for other modules:
+//   horse.userData.saddleY  - how high up Natalia sits (riding.js uses it)
+//   horse.userData.barY     - how high the hunger bar floats
+// ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 
 // ---------------------------------------------------------------------------
+// The kinds of horse. Each one is a coat, a few colours and its own stats:
+//
+//   speed          how fast it gallops, in units a second (Natalia walks 4.5)
+//   hungerSeconds  how long a full hunger bar takes to empty, in seconds
+//   scale          how big it is next to a normal horse (1 = normal)
+//
+// These numbers are DELIBERATELY fast for now, so a bar visibly drops while we
+// are testing. A real game would use much slower ones.
+// ---------------------------------------------------------------------------
+export const HORSE_KINDS = {
+  chestnut: {
+    label: 'Chestnut',
+    coat: 0x9c6b3a,   // warm brown, the Phase 1 horse
+    mane: 0x3e2723,   // mane and tail, almost black
+    hoof: 0x3e2723,
+    speed: 11,
+    hungerSeconds: 90,
+    scale: 1.0,
+  },
+  white: {
+    label: 'White',
+    coat: 0xf2efe6,   // creamy white
+    mane: 0xbfbfbf,   // light grey mane and tail, so they still show up
+    hoof: 0xbfbfbf,
+    speed: 13,        // the fastest horse on the ranch...
+    hungerSeconds: 60, // ...and the one that gets hungry quickest
+    scale: 1.0,
+  },
+  black: {
+    label: 'Black',
+    coat: 0x2b2b2b,
+    mane: 0x111111,
+    hoof: 0x000000,
+    speed: 9,          // big and steady rather than quick
+    hungerSeconds: 150, // but it hardly ever needs feeding
+    scale: 1.05,        // a touch taller than the others
+  },
+  pony: {
+    label: 'Pony',
+    coat: 0xc9a26b,    // sandy dun
+    mane: 0x3e2723,
+    hoof: 0x3e2723,
+    speed: 8,
+    hungerSeconds: 120,
+    scale: 0.75,       // a proper little pony
+  },
+};
+
+// The kind we fall back to if somebody asks for one we do not have.
+const DEFAULT_KIND = 'chestnut';
+
+// ---------------------------------------------------------------------------
+// Tack colours: what a saddle or a blanket can be painted.
+// 'none' means "not wearing one", which is why its value is null.
+// ---------------------------------------------------------------------------
+export const TACK_COLORS = {
+  none: null,
+  brown: 0x6d4c41,
+  red: 0xc62828,
+  blue: 0x1565c0,
+  purple: 0x6a1b9a,
+  pink: 0xd81b60,
+  green: 0x2e7d32,
+};
+
+// ---------------------------------------------------------------------------
 // Tuning numbers, all in one place.
 // ---------------------------------------------------------------------------
-
-// Hunger points lost per second. 100 / 90 empties a full bar in about ninety
-// seconds. That is DELIBERATELY fast for now, so the bar visibly drops while
-// we are testing Phase 2. A real game would use a much slower number.
-const HUNGER_DRAIN_PER_SECOND = 100 / 90; // about 1.11 points a second
 
 const MAX_HUNGER = 100;
 
@@ -44,14 +129,29 @@ const GAIT_EASE = 8;     // how quickly the swing fades in when it sets off and
                          // out when it stops, so it never freezes mid-stride
 const BODY_BOB = 0.05;   // how far the body lifts on each stride
 
-// How high the hip joints are above the grass. Each leg hangs from this point
-// and turns around it, the way a real leg turns at the hip.
+// How high the hip joints are above the grass, at scale 1. Each leg hangs from
+// this point and turns around it, the way a real leg turns at the hip.
 const HIP_HEIGHT = 1.25;
 
-// The floating hunger bar. It has to clear the hat of whoever is riding:
-// Natalia's straw hat reaches about 3.33 above the horse's feet, so 3.95
-// leaves a comfortable gap above it.
-const BAR_HEIGHT_ABOVE_FEET = 3.95;
+// The top of the barrel at scale 1: the barrel is centred at y = 1.6 and is
+// 0.85 tall, so its back is at 2.025. Everything to do with sitting on the
+// horse or dressing it is measured from here.
+const BACK_TOP = 2.025;
+
+// How far BELOW the back Natalia's own origin (her feet) sits when she is in
+// the saddle: she straddles the barrel, so her feet hang down either side.
+// 2.025 - 0.425 = 1.6, which is exactly where Phase 3 put her.
+const RIDER_SIT_DROP = 0.425;
+
+// A saddle is a cushion, so it lifts the rider a little.
+const SADDLE_LIFT = 0.12;
+
+// The floating hunger bar floats this far above the horse's back. The back
+// moves up and down with the horse's size, but this gap does NOT: it has to
+// clear the straw hat of whoever is riding, and Natalia is the same height
+// whichever horse she is on. At scale 1 it comes to 2.025 + 1.925 = 3.95,
+// which is exactly where Phase 2 put it.
+const BAR_ABOVE_BACK = 1.925;
 const BAR_WIDTH = 1.6;
 const BAR_THICKNESS = 0.22;
 const BAR_DEPTH = 0.05;
@@ -62,13 +162,12 @@ const BAR_YELLOW = 0xffc107;
 const BAR_RED = 0xe53935;
 const BAR_BACKGROUND = 0x2b2b2b; // dark grey, so the fill stands out
 
-// Default chestnut coat, the same brown the Phase 1 horse used.
-const DEFAULT_COAT = 0x9c6b3a;
-const HOOF_AND_HAIR = 0x3e2723; // mane, tail and hooves are almost black
-
 // ---------------------------------------------------------------------------
 // Materials. One per colour, made once and shared by every mesh that uses it,
 // which keeps the game light on the graphics card.
+//
+// The saddle and the blanket are the exception: each horse makes its OWN two
+// materials, because Biscuit's red saddle must not turn Snowy's saddle red.
 // ---------------------------------------------------------------------------
 const materials = {};
 function mat(color) {
@@ -125,6 +224,45 @@ function buildLeg(x, z, coat, dark) {
 }
 
 // ---------------------------------------------------------------------------
+// The tack: a saddle and the blanket that goes under it.
+//
+// Both are built at scale 1 and hung off the BODY group, so they bob up and
+// down with the barrel while the horse trots, and they shrink with the horse
+// because the body lives inside the scaled frame.
+//
+// Each horse gets its own material for each piece, so every horse can wear a
+// different colour.
+// ---------------------------------------------------------------------------
+function buildSaddle() {
+  // One material, used by both the seat and the pommel, so setting the saddle
+  // colour is a single line later on.
+  const material = new THREE.MeshLambertMaterial({ color: TACK_COLORS.brown });
+
+  const saddle = new THREE.Group();
+  saddle.name = 'saddle';
+
+  // The seat: a small box lying on the horse's back.
+  saddle.add(box(0.55, 0.18, 0.7, 0, BACK_TOP + 0.095, -0.05, material));
+
+  // The pommel: the little raised lip at the front that a rider holds on to.
+  saddle.add(box(0.34, 0.14, 0.14, 0, BACK_TOP + 0.215, 0.24, material));
+
+  saddle.visible = false; // horses start bare; setSaddle() puts it on
+  return { saddle, material };
+}
+
+function buildBlanket() {
+  const material = new THREE.MeshLambertMaterial({ color: TACK_COLORS.brown });
+
+  // Wider than the barrel (which is 0.9 across) so it hangs over both sides,
+  // and thin, so it reads as a cloth draped over the back.
+  const blanket = box(1.0, 0.06, 0.9, 0, BACK_TOP + 0.015, -0.05, material);
+  blanket.name = 'blanket';
+  blanket.visible = false;
+  return { blanket, material };
+}
+
+// ---------------------------------------------------------------------------
 // The hunger bar: two flat boxes, no HTML at all.  The background is a dark
 // slab and the coloured fill sits just in front of it.
 //
@@ -137,7 +275,6 @@ function buildHungerBar() {
   // "holder" is the part we spin each frame so the bar faces the camera.
   const holder = new THREE.Group();
   holder.name = 'hungerBar';
-  holder.position.y = BAR_HEIGHT_ABOVE_FEET;
 
   // MeshBasicMaterial ignores the lights, so the bar keeps the same bright
   // colour no matter which way the sun is shining.
@@ -187,37 +324,61 @@ function refreshBar(horse) {
 // createHorse - build one horse and everything it carries.
 //
 //   createHorse({
+//     id: 'h1',                   // a short name the save file can use
 //     name: 'Biscuit',            // what the horse is called
-//     coatColor: 0x9c6b3a,        // its coat, as a hex colour
-//     position: new THREE.Vector3(6, 0, 4),
+//     kind: 'chestnut',           // a key of HORSE_KINDS
+//     position: new THREE.Vector3(6, 0, 4),   // or a plain { x, y, z }
 //     rotationY: -0.35,           // which way it is turned, in radians
+//     coatColor: 0x9c6b3a,        // optional: override the kind's own coat.
+//                                 // Phase 7 uses this for foals, whose coat
+//                                 // colour is random.
 //   })
 // ---------------------------------------------------------------------------
 export function createHorse({
+  id = null,
   name = 'Horse',
-  coatColor = DEFAULT_COAT,
+  kind = DEFAULT_KIND,
   position,
   rotationY = 0,
+  coatColor = null,
 } = {}) {
+  // Look the kind up. An unknown kind quietly falls back to a chestnut, so a
+  // typo (or an old save file) can never crash the game.
+  const kindKey = HORSE_KINDS[kind] ? kind : DEFAULT_KIND;
+  const breed = HORSE_KINDS[kindKey];
+  const scale = breed.scale;
+
+  // The outer group: never scaled, so Natalia keeps her own size when she is
+  // added to it as a rider.
   const horse = new THREE.Group();
   horse.name = 'horse';
 
-  const coat = mat(coatColor);
-  const dark = mat(HOOF_AND_HAIR);
+  // The inner group holds the whole animal, built at normal size, and IS
+  // scaled. Shrink this and the horse gets smaller; the rider does not.
+  const frame = new THREE.Group();
+  frame.name = 'frame';
+  frame.scale.setScalar(scale);
+  horse.add(frame);
+
+  // A foal's random coat (Phase 7) overrides whatever the kind says.
+  const finalCoat = coatColor === null ? breed.coat : coatColor;
+  const coat = mat(finalCoat);
+  const hair = mat(breed.mane);
+  const hoofColor = mat(breed.hoof);
 
   // Four legs with darker hooves. The horse looks along +Z, so the front legs
   // are the ones at z = +0.7, and its own left-hand side is +X.
-  const frontLeft = buildLeg(0.33, 0.7, coat, dark);
-  const frontRight = buildLeg(-0.33, 0.7, coat, dark);
-  const backLeft = buildLeg(0.33, -0.7, coat, dark);
-  const backRight = buildLeg(-0.33, -0.7, coat, dark);
+  const frontLeft = buildLeg(0.33, 0.7, coat, hoofColor);
+  const frontRight = buildLeg(-0.33, 0.7, coat, hoofColor);
+  const backLeft = buildLeg(0.33, -0.7, coat, hoofColor);
+  const backRight = buildLeg(-0.33, -0.7, coat, hoofColor);
   const legs = [frontLeft, frontRight, backLeft, backRight];
-  for (const leg of legs) horse.add(leg);
+  for (const leg of legs) frame.add(leg);
 
   // Everything above the legs hangs off "body", so the walk can bob it up and
   // down a little without lifting the legs or the hunger bar with it.
   const body = new THREE.Group();
-  horse.add(body);
+  frame.add(body);
 
   // Barrel of the body, long in the Z direction.
   body.add(box(0.9, 0.85, 2.1, 0, 1.6, 0, coat));
@@ -227,8 +388,8 @@ export function createHorse({
   neck.rotation.x = 0.45;
   body.add(neck);
 
-  // Mane: a thin dark slab lying along the back of the neck.
-  const mane = box(0.14, 1.05, 0.2, 0, 2.05, 0.6, dark);
+  // Mane: a thin slab lying along the back of the neck.
+  const mane = box(0.14, 1.05, 0.2, 0, 2.05, 0.6, hair);
   mane.rotation.x = 0.45;
   body.add(mane);
 
@@ -243,12 +404,23 @@ export function createHorse({
   body.add(shaped(earGeo, 0.14, 2.92, 1.02, coat));
 
   // Tail hanging off the back.
-  const tail = box(0.18, 0.8, 0.18, 0, 1.75, -1.1, dark);
+  const tail = box(0.18, 0.8, 0.18, 0, 1.75, -1.1, hair);
   tail.rotation.x = 0.35;
   body.add(tail);
 
-  // The floating hunger bar rides along as a child of the horse.
+  // The tack. Both pieces are children of the body, so they bob with the
+  // barrel and shrink with the horse. Both start hidden.
+  const blanketParts = buildBlanket();
+  const saddleParts = buildSaddle();
+  body.add(blanketParts.blanket);
+  body.add(saddleParts.saddle);
+
+  // The floating hunger bar rides along as a child of the OUTER group, so we
+  // can place it in real world units. It is scaled to match the horse, so a
+  // pony gets a pony-sized bar.
   const bar = buildHungerBar();
+  bar.holder.scale.setScalar(scale);
+  bar.holder.position.y = BACK_TOP * scale + BAR_ABOVE_BACK;
   horse.add(bar.holder);
 
   if (position) horse.position.copy(position);
@@ -288,25 +460,98 @@ export function createHorse({
 
   // Everything the game needs to know about this horse lives here.
   horse.userData = {
-    kind: 'horse',
-    name,
+    id,                    // for the save file: 'h1', 'h2', ...
+    name,                  // 'Biscuit'
+    kind: kindKey,         // 'chestnut' | 'white' | 'black' | 'pony'
+    label: breed.label,    // 'Chestnut' - the pretty version, for menus
     hunger: MAX_HUNGER,    // 100 = just fed, 0 = starving
-    coatColor,
+    // How fast this horse gallops, in units a second. riding.js reads it.
+    speed: breed.speed,
+    // Hunger points lost per second, worked out from the kind's hungerSeconds:
+    // a bar that empties in 60 seconds loses 100 / 60 points a second.
+    hungerDrainPerSecond: MAX_HUNGER / breed.hungerSeconds,
+    scale,                 // how big this horse is next to a normal one
+    coatColor: finalCoat,
+    saddle: 'none',        // which TACK_COLORS key it is wearing
+    blanket: 'none',
+    // Real world-unit heights, for code outside this module:
+    backY: BACK_TOP * scale,   // the top of its back
+    saddleY: 0,                // where Natalia sits - filled in just below
+    barY: bar.holder.position.y,
     head,                  // the mesh that bobs when we feed it
     headRestAngle: head.rotation.x,
     feedTimer: 0,          // counts down through the happy head-bob
     barHolder: bar.holder, // the part that turns to face the camera
     barFill: bar.fill,     // the coloured part we shrink as hunger drops
+    frame,                 // the scaled group holding the whole animal
     body,                  // everything above the legs, for the walking bob
     legs,                  // [frontLeft, frontRight, backLeft, backRight]
+    saddleGroup: saddleParts.saddle,     // seat + pommel
+    saddleMaterial: saddleParts.material,
+    blanketMesh: blanketParts.blanket,
+    blanketMaterial: blanketParts.material,
     setMoving,             // call once a frame: swings the legs while walking
   };
+
+  // Work out where a rider sits. Doing it through the helper means the number
+  // is worked out in exactly one place, here and whenever the saddle changes.
+  refreshSaddleHeight(horse);
 
   // Draw the bar at the right size straight away, so it is never wrong on the
   // very first frame.
   refreshBar(horse);
 
   return horse;
+}
+
+// ---------------------------------------------------------------------------
+// refreshSaddleHeight - how high above the grass Natalia's feet sit when she
+// is on this horse. riding.js reads horse.userData.saddleY at mount time.
+//
+// She straddles the barrel, so she sits a little below the top of the back -
+// and a saddle, being a cushion, lifts her a touch higher again.
+// ---------------------------------------------------------------------------
+function refreshSaddleHeight(horse) {
+  const data = horse.userData;
+  const lift = data.saddle === 'none' ? 0 : SADDLE_LIFT;
+  data.saddleY = (BACK_TOP - RIDER_SIT_DROP) * data.scale + lift;
+}
+
+// ---------------------------------------------------------------------------
+// setSaddle / setBlanket - dress the horse.
+//
+//   setSaddle(horse, 'red')    puts a red saddle on
+//   setSaddle(horse, 'none')   takes it off again
+//
+// The colour key is remembered on horse.userData.saddle / .blanket, which is
+// exactly what the save file stores. An unknown key is treated as 'none', so
+// an old or hand-edited save can never break the game.
+// Returns the key that was actually applied.
+// ---------------------------------------------------------------------------
+function setTack(mesh, material, colorKey) {
+  const color = TACK_COLORS[colorKey];
+  // Both a missing key and 'none' end up here as null/undefined: nothing worn.
+  if (color === null || color === undefined) {
+    mesh.visible = false;
+    return 'none';
+  }
+  material.color.setHex(color);
+  mesh.visible = true;
+  return colorKey;
+}
+
+export function setSaddle(horse, colorKey) {
+  const data = horse.userData;
+  data.saddle = setTack(data.saddleGroup, data.saddleMaterial, colorKey);
+  // A saddle changes how high the rider sits, so redo that sum.
+  refreshSaddleHeight(horse);
+  return data.saddle;
+}
+
+export function setBlanket(horse, colorKey) {
+  const data = horse.userData;
+  data.blanket = setTack(data.blanketMesh, data.blanketMaterial, colorKey);
+  return data.blanket;
 }
 
 // A scratch vector, made once and re-used, so we are not creating new objects
@@ -325,8 +570,9 @@ export function updateHorse(horse, dt, camera) {
   // way controls.js does, so the horse does not starve while we were away.
   const step = Math.min(dt, 0.1);
 
-  // 1. Get hungrier (never below zero).
-  data.hunger = Math.max(0, data.hunger - HUNGER_DRAIN_PER_SECOND * step);
+  // 1. Get hungrier (never below zero), at this horse's own rate: a white
+  //    horse empties its bar in a minute, a black one takes two and a half.
+  data.hunger = Math.max(0, data.hunger - data.hungerDrainPerSecond * step);
 
   // 2. Redraw the bar for the new hunger value.
   refreshBar(horse);

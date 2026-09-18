@@ -54,8 +54,8 @@
     #prompt {
       position: fixed;
       left: 50%;
-      /* Clear of the short four-line hint box in the bottom-left corner. */
-      bottom: 90px;
+      /* Clear of the short five-line hint box in the bottom-left corner. */
+      bottom: 108px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -119,6 +119,281 @@
         font-size: 15px;
       }
     }
+
+    /* -----------------------------------------------------------------
+       THE BARN MENU
+       The panel that opens when the player presses E at the barn door:
+       pick a horse, then tap a colour for its saddle and its blanket.
+       js/menu.js builds all the buttons inside it and adds the "visible"
+       class to show it. Everything here is big and round on purpose -
+       it has to be easy for an eight-year-old to read and to tap.
+       ----------------------------------------------------------------- */
+
+    /* The dark sheet over the whole screen. Hidden until menu.js shows it;
+       "visibility: hidden" (not just see-through) means no stray clicks can
+       land on the buttons while it is away. */
+    #barn-menu {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(12, 16, 22, 0.66);
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #ffffff;
+      user-select: none;
+      z-index: 10;                       /* over the canvas and the hints */
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.15s ease;
+    }
+
+    #barn-menu.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    /* The rounded panel itself. 90vw with a 560px ceiling means it fills a
+       phone screen and stays a tidy box on a laptop. */
+    .barn-panel {
+      width: 90vw;
+      max-width: 560px;
+      max-height: 92vh;
+      overflow-y: auto;                  /* a very short screen can scroll */
+      box-sizing: border-box;
+      padding: 18px 18px 22px;
+      border-radius: 16px;
+      background: rgba(28, 34, 44, 0.96);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+      text-align: center;
+    }
+
+    .barn-title {
+      margin: 2px 0 16px;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    /* One block per question: "Horse", "Saddle", "Blanket". */
+    .barn-row {
+      margin-bottom: 18px;
+    }
+
+    .barn-row-label {
+      margin-bottom: 8px;
+      text-align: left;
+      font-size: 16px;
+      font-weight: 600;
+      color: #ffe082;                    /* the same warm yellow as the keys */
+    }
+
+    /* The buttons in a row. They wrap onto the next line on a narrow screen
+       instead of running off the side. */
+    .barn-choices {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    /* A horse button: its name, with its kind in smaller letters underneath. */
+    .barn-horse {
+      flex: 1 1 140px;
+      min-height: 56px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font: inherit;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    .barn-horse-name {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .barn-horse-kind {
+      font-size: 12px;
+      opacity: 0.75;
+    }
+
+    /* The horse we are dressing right now: green, like the grass. */
+    .barn-horse.selected {
+      background: #6a9c33;
+      border-color: #ffffff;
+    }
+
+    /* "Speed ★★★ · Stays full ★★" under the horse buttons. */
+    .barn-stats {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #dbe4ee;
+    }
+
+    /* A round colour button. The colour itself is set by menu.js. */
+    .barn-swatch {
+      width: 52px;
+      height: 52px;
+      padding: 0;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      color: #ffffff;
+      background: transparent;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* The "None" button - not wearing one - is a plain grey circle. */
+    .barn-swatch-none {
+      background: #5b6472;
+    }
+
+    /* The colour this horse is wearing, ringed in thick white. */
+    .barn-swatch.selected {
+      border-color: rgba(0, 0, 0, 0.35);
+      box-shadow: 0 0 0 4px #ffffff;
+    }
+
+    .barn-close {
+      margin-top: 4px;
+      min-height: 48px;
+      padding: 10px 30px;
+      font: inherit;
+      font-size: 18px;
+      font-weight: 700;
+      color: #23282f;
+      background: #ffb300;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    /* "Start over" - the quiet grey button under Close. It is deliberately
+       smaller and duller than Close: it is the one button in here that throws
+       work away, so nothing about it should invite a tap. */
+    .barn-reset {
+      display: block;
+      margin: 16px auto 0;
+      padding: 6px 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: #b8c0cc;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 9px;
+      cursor: pointer;
+      opacity: 0.8;
+    }
+
+    /* The "Erase everything?" question. It replaces the Start over button in
+       place, inside the panel, so nothing jumps around the screen. Hidden
+       until menu.js adds the "visible" class. */
+    .barn-confirm {
+      display: none;
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(198, 40, 40, 0.14);
+      border: 1px solid rgba(255, 138, 128, 0.4);
+    }
+
+    .barn-confirm.visible {
+      display: block;
+    }
+
+    .barn-confirm-text {
+      margin-bottom: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #ffd7d2;
+    }
+
+    .barn-confirm-choices {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    /* Red for "yes, really erase it", plain grey for "no, take me back". */
+    .barn-confirm-yes,
+    .barn-confirm-no {
+      min-height: 40px;
+      padding: 8px 16px;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .barn-confirm-yes {
+      color: #ffffff;
+      background: #c62828;
+    }
+
+    .barn-confirm-no {
+      color: #23282f;
+      background: #dfe4ea;
+    }
+
+    /* The little "Saved" note that blinks in the top-right corner after the
+       player changes something. It fades itself out after a second and never
+       takes a click, so it cannot get in the way of the game. */
+    #saved {
+      position: fixed;
+      right: 14px;
+      top: 14px;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: rgba(20, 24, 30, 0.55);
+      color: #e8ecf2;
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0;                       /* hidden by default */
+      transition: opacity 0.3s ease;
+      z-index: 5;
+    }
+
+    #saved.visible {
+      opacity: 0.9;
+    }
+
+    /* Phone screens: a slightly smaller title and slightly smaller circles,
+       so three rows of buttons still fit without scrolling. */
+    @media (max-width: 700px) {
+      .barn-title {
+        font-size: 24px;
+      }
+
+      .barn-swatch {
+        width: 46px;
+        height: 46px;
+      }
+
+      .barn-horse {
+        flex: 1 1 100%;                  /* one horse per line, nice and wide */
+      }
+    }
   </style>
 
   <!-- Import map: tells the browser where the bare name "three" points to.
@@ -133,12 +408,13 @@
   </script>
 </head>
 <body>
-  <!-- On-screen controls hint: four short lines, tucked in the corner. -->
+  <!-- On-screen controls hint: five short lines, tucked in the corner. -->
   <div id="hint">
     <b>Move:</b> W A S D / arrows<br>
     <b>Look:</b> drag mouse<br>
     <b>E:</b> ride / get off<br>
-    <b>F:</b> feed
+    <b>F:</b> feed<br>
+    <b>Barn:</b> press E at the barn door
   </div>
 
   <!-- "Press E to ..." appears here when Natalia is close to something. -->
@@ -146,6 +422,10 @@
 
   <!-- Short feedback, like "Yum! Biscuit is happy.", flashes up here. -->
   <div id="message"></div>
+
+  <!-- "Saved" blinks here for a second whenever the game writes the ranch to
+       the browser's storage after the player changes something. -->
+  <div id="saved">Saved</div>
 
   <script type="module" src="./js/main.js"></script>
 </body>

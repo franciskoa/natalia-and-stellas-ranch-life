@@ -10,12 +10,24 @@
 //   isMoving()             - true while a walk key is held (for the animations)
 //   setSubject(config)     - drive something else, at its own speed
 //   getSubject()           - the config we are driving right now
+//   setEnabled(bool)       - false while a menu is open: the keys and the
+//                            mouse drag are ignored (and any held key is
+//                            forgotten), but the camera still follows along
+//   snapCamera()           - put the camera straight behind the subject now,
+//                            with no gliding (main.js uses it after a save
+//                            file has moved Natalia somewhere else)
 //   addObstacle(obj, r)    - a round thing to walk around that can move about
-//   isSpotFree(x, z, r)    - is that patch of grass clear of the buildings and
+//   isSpotFree(x, z, r, ignore)
+//                          - is that patch of grass clear of the buildings AND
+//                            of every round obstacle (the other horses), and
 //                            inside the ranch? (riding.js asks before it puts
-//                            Natalia down beside a horse)
-//   resolveSpot(x, z, r)   - the nearest spot that IS clear, pushed out of any
-//                            building the same way walking into one would be
+//                            Natalia down beside a horse.) "ignore" is one
+//                            object whose circle does not count - the horse
+//                            she is climbing off does not block her.
+//   resolveSpot(x, z, r, ignore)
+//                          - the nearest spot that IS clear, pushed out of any
+//                            building or horse the same way walking into one
+//                            would be
 //
 // Movement is camera-relative: W always walks away from the camera, whichever
 // way the camera happens to be pointing.
@@ -196,6 +208,10 @@ export function createControls(player, camera, domElement, bounds) {
   let lastPointerY = 0;
   let moving = false;
 
+  // While the barn menu is open the controls are switched off: the camera
+  // still follows her, but held keys and mouse drags are ignored.
+  let enabled = true;
+
   // Reusable vectors, so we are not making new ones 60 times a second.
   const lookTarget = new THREE.Vector3();
   const wantedCamera = new THREE.Vector3();
@@ -203,6 +219,7 @@ export function createControls(player, camera, domElement, bounds) {
 
   // --- keyboard ------------------------------------------------------------
   function onKeyDown(event) {
+    if (!enabled) return;                  // a menu is open: the keys are hers
     if (event.repeat) return;              // ignore the OS key-repeat storm
     if (!ALL_KEYS.includes(event.code)) return;
     held.add(event.code);
@@ -227,6 +244,7 @@ export function createControls(player, camera, domElement, bounds) {
 
   // --- mouse: hold the left button and drag to look around ------------------
   function onPointerDown(event) {
+    if (!enabled) return;                  // no looking around from a menu
     if (event.button !== 0) return;
     dragging = true;
     lastPointerX = event.clientX;
@@ -241,6 +259,7 @@ export function createControls(player, camera, domElement, bounds) {
   }
 
   function onPointerMove(event) {
+    if (!enabled) return;
     if (!dragging) return;
     const dx = event.clientX - lastPointerX;
     const dy = event.clientY - lastPointerY;
@@ -309,6 +328,15 @@ export function createControls(player, camera, domElement, bounds) {
 
   // --- one frame of movement ------------------------------------------------
   function moveSubject(dt) {
+    // Switched off (the barn menu is open): nobody moves. Any key that was
+    // being held when the menu opened is forgotten, so she does not set off
+    // again the moment it closes.
+    if (!enabled) {
+      held.clear();
+      moving = false;
+      return;
+    }
+
     // Add up the keys into "forward" and "sideways" amounts.
     let forwardInput = 0;
     let rightInput = 0;
@@ -418,14 +446,58 @@ export function createControls(player, camera, domElement, bounds) {
     return moving;
   }
 
-  // The same two spot helpers as above, but with this ranch's bounds already
-  // filled in, so callers that hold the controls object do not have to.
-  function isSpotFreeHere(x, z, radius = WALK_RADIUS) {
-    return isSpotFree(x, z, radius, bounds);
+  // Put the camera straight behind the subject right now, with no gliding.
+  // main.js calls this once after a save file has moved Natalia somewhere
+  // else, so the game does not open with the camera swooping across the ranch.
+  function snapCamera() {
+    moveCamera(0, true);
   }
 
-  function resolveSpotHere(x, z, radius = WALK_RADIUS) {
-    return resolveSpot(x, z, radius, bounds);
+  // setEnabled(false) switches the keyboard and the mouse drag off while a
+  // menu is open. update() still runs the camera, so the world keeps looking
+  // alive behind the panel. setEnabled(true) hands the controls back.
+  function setEnabled(value) {
+    enabled = !!value;
+    if (!enabled) {
+      held.clear();
+      moving = false;
+      dragging = false;
+    }
+  }
+
+  // The same two spot helpers as above, but with this ranch's bounds already
+  // filled in - and, because this version of them knows about the obstacle
+  // list, the horses standing about are taken into account too.
+  //
+  // "ignore" is one object we pretend is not there. riding.js passes the horse
+  // Natalia is getting off: she is allowed to land right beside it.
+  function isSpotFreeHere(x, z, radius = WALK_RADIUS, ignore = null) {
+    // The buildings and the edge of the ranch first.
+    if (!isSpotFree(x, z, radius, bounds)) return false;
+
+    // Then every round obstacle: a spot inside another horse is no good.
+    for (const obstacle of obstacles) {
+      if (obstacle.object === ignore) continue;
+      obstacle.object.getWorldPosition(obstaclePosition);
+      const gap = Math.hypot(x - obstaclePosition.x, z - obstaclePosition.z);
+      if (gap < obstacle.radius + radius) return false;
+    }
+
+    return true;
+  }
+
+  function resolveSpotHere(x, z, radius = WALK_RADIUS, ignore = null) {
+    const spot = resolveSpot(x, z, radius, bounds);
+
+    // Shove it out of any horse it landed inside, the same way walking into
+    // one would push her back out.
+    for (const obstacle of obstacles) {
+      if (obstacle.object === ignore) continue;
+      obstacle.object.getWorldPosition(obstaclePosition);
+      pushOutOfCircle(spot, obstaclePosition.x, obstaclePosition.z, obstacle.radius + radius);
+    }
+
+    return spot;
   }
 
   // Put the camera straight behind her before the first frame is drawn.
@@ -436,6 +508,8 @@ export function createControls(player, camera, domElement, bounds) {
     isMoving,
     setSubject,
     getSubject,
+    setEnabled,
+    snapCamera,
     addObstacle,
     isSpotFree: isSpotFreeHere,
     resolveSpot: resolveSpotHere,

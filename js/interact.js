@@ -30,6 +30,8 @@
 //                              Natalia is riding, the horse becomes the player,
 //                              so the horse under her is always the active
 //                              target and E gets her off again.
+//   setEnabled(bool)         - false while a menu is open: the prompt is
+//                              hidden and E and F do nothing
 //   showMessage(text, secs)  - flash a short message at the top of the screen
 
 import * as THREE from 'three';
@@ -98,10 +100,15 @@ export function createInteractions(player, promptElement, messageElement) {
   // Seconds of message left to show. 0 means "no message on screen".
   let messageTimer = 0;
 
+  // While the barn menu is open this whole system is switched off: no prompt
+  // on screen, and E and F do nothing.
+  let enabled = true;
+
   // --- the interaction keys -------------------------------------------------
   // These live here and not in controls.js on purpose: walking keys are held
   // down, but E and F are one-shot presses, so the two are handled differently.
   function onKeyDown(event) {
+    if (!enabled) return;      // a menu is open: E and F belong to it
     if (event.repeat) return;  // holding E must not mount and dismount forever
     if (!watchedKeys.has(event.code)) return;
     pressedKeys.add(event.code);
@@ -199,6 +206,20 @@ export function createInteractions(player, promptElement, messageElement) {
     // same way the rest of the game does.
     const step = Math.min(dt, 0.1);
 
+    // Switched off (a menu is open): no prompt, nothing in range, and any key
+    // pressed while we were away is thrown out rather than saved up. The
+    // message timer below still runs, so a message fades away as usual.
+    if (!enabled) {
+      pressedKeys.clear();
+      activeTarget = null;
+      hidePrompt();
+      if (messageTimer > 0) {
+        messageTimer -= step;
+        if (messageTimer <= 0) hideMessage();
+      }
+      return;
+    }
+
     // 1. What is the player standing next to?
     activeTarget = findNearest();
 
@@ -239,9 +260,20 @@ export function createInteractions(player, promptElement, messageElement) {
     if (object) distanceFrom = object;
   }
 
+  // setEnabled(false) switches the prompt and the interaction keys off while a
+  // menu is open, so E cannot mount a horse from behind the panel.
+  function setEnabled(value) {
+    enabled = !!value;
+    if (!enabled) {
+      pressedKeys.clear();
+      activeTarget = null;
+      hidePrompt();
+    }
+  }
+
   // Start with both bits of text hidden, whatever the page was showing before.
   hidePrompt();
   hideMessage();
 
-  return { register, update, current, setPlayer, showMessage };
+  return { register, update, current, setPlayer, setEnabled, showMessage };
 }
