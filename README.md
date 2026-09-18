@@ -26,7 +26,7 @@ No build tools, no npm install.
 |---|---|---|
 | 1 | Walk around | done — ranch yard, house, barn, horse, Natalia + Stella, WASD/arrows, drag-to-look camera |
 | 2 | Feed a horse | done — hunger bar above the horse drains over ~90 s, walk up and press E to feed |
-| 3 | Ride a horse | not started |
+| 3 | Ride a horse | done — E to ride / get off (about 2.4x walking speed), F to feed, horse legs animate, Stella keeps up |
 | 4 | Multiple horses + customization + save | not started |
 | 5 | Chickens, coins, market stall, store | not started |
 | 6 | Neighbors and trading | not started |

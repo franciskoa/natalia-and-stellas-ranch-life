@@ -11,6 +11,12 @@
 //   feedHorse(horse)                - fill the hunger bar up again
 //   isHungry(horse)                 - true while the bar is not full
 //
+// Each horse also carries its own little walk animation, the same idea as the
+// girls' setWalking in characters.js:
+//   horse.userData.setMoving(isMoving, dt)   - swing the legs while it walks
+//   horse.userData.legs                      - [frontLeft, frontRight,
+//                                               backLeft, backRight]
+//
 // The hunger number itself lives on the group, at horse.userData.hunger, and
 // runs from 100 (just fed) down to 0 (very hungry).
 
@@ -31,8 +37,21 @@ const MAX_HUNGER = 100;
 const FEED_BOB_SECONDS = 0.6;
 const FEED_BOB_ANGLE = 0.55; // radians the head tips down at the bottom
 
-// The floating hunger bar.
-const BAR_HEIGHT_ABOVE_FEET = 3.4; // just above the ears
+// The walk cycle, built the same way as the girls' one in characters.js.
+const GAIT_SWING = 0.5;  // radians: how far forward and back a leg swings
+const GAIT_RATE = 8;     // how fast the legs swing, in radians a second
+const GAIT_EASE = 8;     // how quickly the swing fades in when it sets off and
+                         // out when it stops, so it never freezes mid-stride
+const BODY_BOB = 0.05;   // how far the body lifts on each stride
+
+// How high the hip joints are above the grass. Each leg hangs from this point
+// and turns around it, the way a real leg turns at the hip.
+const HIP_HEIGHT = 1.25;
+
+// The floating hunger bar. It has to clear the hat of whoever is riding:
+// Natalia's straw hat reaches about 3.33 above the horse's feet, so 3.95
+// leaves a comfortable gap above it.
+const BAR_HEIGHT_ABOVE_FEET = 3.95;
 const BAR_WIDTH = 1.6;
 const BAR_THICKNESS = 0.22;
 const BAR_DEPTH = 0.05;
@@ -64,6 +83,11 @@ function mat(color) {
 // they can all share one shape each instead of making their own copies.
 // ---------------------------------------------------------------------------
 const legGeo = new THREE.BoxGeometry(0.22, 1.0, 0.22);
+// Move the leg shape down inside itself, so y = 0 is its TOP end. A leg has to
+// swing from the hip, and a mesh always turns around its own origin: leave the
+// shape centred and the leg would pivot around its knee instead.
+legGeo.translate(0, -0.5, 0);
+
 const hoofGeo = new THREE.BoxGeometry(0.28, 0.26, 0.3);
 const earGeo = new THREE.BoxGeometry(0.12, 0.24, 0.12);
 
@@ -79,6 +103,25 @@ function shaped(geometry, x, y, z, material) {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(x, y, z);
   return mesh;
+}
+
+// One leg: a small group parked at the hip, with the leg and its hoof hanging
+// below it. Turning that group swings the whole leg from the hip in one piece.
+function buildLeg(x, z, coat, dark) {
+  const leg = new THREE.Group();
+  leg.position.set(x, HIP_HEIGHT, z);
+
+  // The leg shape already has its origin at the top (see legGeo above), so it
+  // simply hangs straight down from the hip.
+  leg.add(new THREE.Mesh(legGeo, coat));
+
+  // The hoof sits at the bottom. Its height is measured from the hip now that
+  // it is a child of the leg, so 0.13 above the grass is 0.13 - HIP_HEIGHT.
+  const hoof = new THREE.Mesh(hoofGeo, dark);
+  hoof.position.y = 0.13 - HIP_HEIGHT;
+  leg.add(hoof);
+
+  return leg;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,41 +205,47 @@ export function createHorse({
   const coat = mat(coatColor);
   const dark = mat(HOOF_AND_HAIR);
 
-  // Four legs with darker hooves. Front legs at z = +0.7, back legs at z = -0.7.
-  for (const sx of [-0.33, 0.33]) {
-    for (const sz of [0.7, -0.7]) {
-      horse.add(shaped(legGeo, sx, 0.75, sz, coat));  // leg
-      horse.add(shaped(hoofGeo, sx, 0.13, sz, dark)); // hoof
-    }
-  }
+  // Four legs with darker hooves. The horse looks along +Z, so the front legs
+  // are the ones at z = +0.7, and its own left-hand side is +X.
+  const frontLeft = buildLeg(0.33, 0.7, coat, dark);
+  const frontRight = buildLeg(-0.33, 0.7, coat, dark);
+  const backLeft = buildLeg(0.33, -0.7, coat, dark);
+  const backRight = buildLeg(-0.33, -0.7, coat, dark);
+  const legs = [frontLeft, frontRight, backLeft, backRight];
+  for (const leg of legs) horse.add(leg);
+
+  // Everything above the legs hangs off "body", so the walk can bob it up and
+  // down a little without lifting the legs or the hunger bar with it.
+  const body = new THREE.Group();
+  horse.add(body);
 
   // Barrel of the body, long in the Z direction.
-  horse.add(box(0.9, 0.85, 2.1, 0, 1.6, 0, coat));
+  body.add(box(0.9, 0.85, 2.1, 0, 1.6, 0, coat));
 
   // Neck: a box tilted forward so it rises towards the head.
   const neck = box(0.55, 1.0, 0.55, 0, 2.05, 0.85, coat);
   neck.rotation.x = 0.45;
-  horse.add(neck);
+  body.add(neck);
 
   // Mane: a thin dark slab lying along the back of the neck.
   const mane = box(0.14, 1.05, 0.2, 0, 2.05, 0.6, dark);
   mane.rotation.x = 0.45;
-  horse.add(mane);
+  body.add(mane);
 
   // Head, tipped slightly nose-down. We keep hold of this one, because it is
   // the part that bobs when the horse is fed.
   const head = box(0.45, 0.45, 0.95, 0, 2.62, 1.25, coat);
   head.rotation.x = 0.35;
-  horse.add(head);
+  body.add(head);
 
   // Two small ears on top of the head.
-  horse.add(shaped(earGeo, -0.14, 2.92, 1.02, coat));
-  horse.add(shaped(earGeo, 0.14, 2.92, 1.02, coat));
+  body.add(shaped(earGeo, -0.14, 2.92, 1.02, coat));
+  body.add(shaped(earGeo, 0.14, 2.92, 1.02, coat));
 
   // Tail hanging off the back.
   const tail = box(0.18, 0.8, 0.18, 0, 1.75, -1.1, dark);
   tail.rotation.x = 0.35;
-  horse.add(tail);
+  body.add(tail);
 
   // The floating hunger bar rides along as a child of the horse.
   const bar = buildHungerBar();
@@ -204,6 +253,38 @@ export function createHorse({
 
   if (position) horse.position.copy(position);
   horse.rotation.y = rotationY;
+
+  // -------------------------------------------------------------------------
+  // The walk. "phase" is where we are in the stride, and "swing" fades the
+  // whole animation in and out, so the legs never freeze half way through a
+  // step when the horse stops.
+  //
+  // Real horses move their legs in diagonal pairs: the front-left hoof and the
+  // back-right hoof go forward together, then the other two. That is why two
+  // legs get +a and the other two get -a.
+  // -------------------------------------------------------------------------
+  let phase = 0;
+  let swing = 0;
+
+  function setMoving(isMoving, dt) {
+    // Cap dt the same way the rest of the game does, so a background tab
+    // coming back to life does not jump the legs half a stride.
+    const step = Math.min(dt || 0, 0.1);
+
+    if (isMoving) phase += step * GAIT_RATE;
+    // Ease "swing" towards 1 while moving and towards 0 while standing.
+    const goal = isMoving ? 1 : 0;
+    swing += (goal - swing) * Math.min(1, step * GAIT_EASE);
+
+    const a = Math.sin(phase) * GAIT_SWING * swing;
+    frontLeft.rotation.x = a;
+    backRight.rotation.x = a;   // the diagonal partner, in step with it
+    frontRight.rotation.x = -a;
+    backLeft.rotation.x = -a;
+
+    // A small bounce in the body, twice per stride, the way the girls bob.
+    body.position.y = Math.abs(Math.sin(phase)) * BODY_BOB * swing;
+  }
 
   // Everything the game needs to know about this horse lives here.
   horse.userData = {
@@ -216,6 +297,9 @@ export function createHorse({
     feedTimer: 0,          // counts down through the happy head-bob
     barHolder: bar.holder, // the part that turns to face the camera
     barFill: bar.fill,     // the coloured part we shrink as hunger drops
+    body,                  // everything above the legs, for the walking bob
+    legs,                  // [frontLeft, frontRight, backLeft, backRight]
+    setMoving,             // call once a frame: swings the legs while walking
   };
 
   // Draw the bar at the right size straight away, so it is never wrong on the

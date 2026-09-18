@@ -169,7 +169,12 @@ function makeGirl(look, kind) {
   let phase = 0;
   let swing = 0;
 
+  // While she is sitting on a horse the walk animation is switched off and the
+  // legs are held in the sitting pose instead.
+  let sitting = false;
+
   function setWalking(isWalking, dt) {
+    if (sitting) return;  // frozen in the saddle: nothing to swing
     if (isWalking) phase += dt * 9;
     // Ease "swing" towards 1 while walking and towards 0 while standing still.
     const goal = isWalking ? 1 : 0;
@@ -183,7 +188,32 @@ function makeGirl(look, kind) {
     root.position.y = Math.abs(Math.sin(phase)) * 0.035 * swing;
   }
 
-  group.userData = { kind, setWalking };
+  // -------------------------------------------------------------------------
+  // Sitting pose, used when she climbs onto a horse. Her thighs swing forward
+  // so they lie along the horse's back, and her hands come up to hold the
+  // reins. A negative rotation.x swings a limb forwards, the same way the walk
+  // animation does it.
+  // -------------------------------------------------------------------------
+  const SIT_LEG_ANGLE = -1.3;  // radians: thighs almost straight out in front
+  const SIT_ARM_ANGLE = -0.5;  // hands forward, holding the reins
+
+  function setSitting(isSitting) {
+    sitting = isSitting;
+
+    // Start the walk cycle from scratch next time she gets down.
+    phase = 0;
+    swing = 0;
+    root.position.y = 0;
+
+    const legAngle = isSitting ? SIT_LEG_ANGLE : 0;
+    const armAngle = isSitting ? SIT_ARM_ANGLE : 0;
+    legL.rotation.x = legAngle;
+    legR.rotation.x = legAngle;
+    armL.rotation.x = armAngle;
+    armR.rotation.x = armAngle;
+  }
+
+  group.userData = { kind, setWalking, setSitting };
   return group;
 }
 
@@ -210,6 +240,26 @@ const FOLLOW_SPEED = 5.6;   // a bit faster than the player, so she can catch up
 const ARRIVE = 0.3;         // close enough: stop completely (no jitter)
 const PERSONAL_SPACE = 1.2; // never crowd the leader closer than this
 const TURN_SPEED = 7;       // how quickly she swivels to face a new direction
+
+// Keeping up with a horse. A galloping horse does 11 units a second, so a
+// flat 5.6 would leave Stella further behind with every stride. Instead, the
+// further she falls behind her spot, the faster she runs:
+//
+//   gap up to CATCH_UP_GAP  ->  her normal FOLLOW_SPEED
+//   beyond that             ->  FOLLOW_SPEED + (gap - CATCH_UP_GAP) * GAIN,
+//                               never faster than MAX_FOLLOW_SPEED
+//
+// With these numbers she settles about 3.7 units behind her spot at a full
+// gallop (that is where her speed works out at the horse's 11), which keeps
+// her in the picture just behind the horse. CATCH_UP_GAP is comfortably wider
+// than any gap she opens up while walking, so ordinary following is unchanged.
+const CATCH_UP_GAP = 3;       // start hurrying once she is this far from her spot
+const CATCH_UP_GAIN = 8;      // extra units a second for every unit of extra gap
+const MAX_FOLLOW_SPEED = 14;  // her flat-out sprint
+
+// If something has left her this far behind - a long gallop across the ranch -
+// there is no catching up in a sensible time, so she quietly pops to her spot.
+const TELEPORT_GAP = 40;
 
 // Turn "current" towards "target" the short way round, at most "maxStep".
 function turnTowards(current, target, maxStep) {
@@ -243,10 +293,33 @@ export function updateFollower(follower, leader, dt) {
   const dz = targetZ - follower.position.z;
   const gap = Math.hypot(dx, dz);
 
+  // Hopelessly far behind? Put her straight on her spot, facing the same way
+  // as the leader, with no walk animation: nobody sees it happen, because she
+  // is miles off screen when it does.
+  if (gap > TELEPORT_GAP) {
+    follower.position.x = targetX;
+    follower.position.z = targetZ;
+    follower.rotation.y = leader.rotation.y;
+    if (follower.userData.setWalking) follower.userData.setWalking(false, dt);
+    return;
+  }
+
   let walking = false;
 
   if (gap > ARRIVE) {
-    const step = Math.min(FOLLOW_SPEED * dt, gap);
+    // Her speed for this frame: the normal amble, plus a bit more for every
+    // unit she has fallen behind, up to a flat-out sprint.
+    let speed = FOLLOW_SPEED;
+    if (gap > CATCH_UP_GAP) {
+      speed = Math.min(
+        MAX_FOLLOW_SPEED,
+        FOLLOW_SPEED + (gap - CATCH_UP_GAP) * CATCH_UP_GAIN
+      );
+    }
+
+    // Never step further than the gap itself, so she cannot overshoot her spot
+    // and wobble back and forth on it.
+    const step = Math.min(speed * dt, gap);
     const nextX = follower.position.x + (dx / gap) * step;
     const nextZ = follower.position.z + (dz / gap) * step;
 
