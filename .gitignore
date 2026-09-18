@@ -1,0 +1,10 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Never needed, but just in case someone runs npm
+node_modules/
+
+# Local Claude Code settings
+.claude/settings.local.json
