@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Natalia and Stella's Ranch Life</title>
 
+  <!-- The little icon on the browser tab: a horse emoji drawn straight into
+       the page as a tiny SVG. Writing it as a data: URL means there is no
+       favicon.ico file to fetch (and no 404 in the console when there isn't
+       one) and still no extra asset in the project folder. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='54'%3E🐴%3C/text%3E%3C/svg%3E">
+
   <style>
     /* Fill the whole browser window, no scrollbars, no white flash:
        the page background is the same sky blue the 3D scene uses. */
@@ -91,9 +97,12 @@
     #prompt {
       position: fixed;
       left: 50%;
-      /* Clear of the short seven-line hint box in the bottom-left corner
-         (seven lines plus its padding come to about 140px tall). */
-      bottom: 152px;
+      /* Clear of the four-line hint box in the bottom-left corner. Four lines
+         at 13px and a line-height of 1.4 come to 73px, plus 12px of padding,
+         which puts the top of that box 97px up from the bottom of the screen.
+         104px leaves a small gap above it and still clears the shorter box on
+         a phone (four lines at 11px: about 86px). */
+      bottom: 104px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -655,15 +664,15 @@
     <div id="hud-legend">coins · horse feed · chicken feed · eggs · chickens</div>
   </div>
 
-  <!-- On-screen controls hint: seven short lines, tucked in the corner. -->
+  <!-- On-screen controls hint: four short lines, tucked in the corner. It is
+       deliberately this short - the "Press E to ..." prompt in the middle of
+       the screen already says what E does at each place, so the corner only
+       has to cover the keys themselves. -->
   <div id="hint">
     <b>Move:</b> W A S D / arrows<br>
     <b>Look:</b> drag mouse<br>
-    <b>E:</b> ride / get off / collect eggs<br>
-    <b>F:</b> feed<br>
-    <b>Barn:</b> press E at the barn door<br>
-    <b>Coop:</b> press E at the chicken gate<br>
-    <b>Store:</b> follow the road signs (E to shop)
+    <b>E:</b> use / ride&nbsp;&nbsp;&nbsp;<b>F:</b> feed<br>
+    Follow the compass to the store
   </div>
 
   <!-- The compass badge at the top of the screen. js/road.js turns the arrow

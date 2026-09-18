@@ -115,6 +115,32 @@ for (const key of Object.keys(COLORS)) {
   M[key] = new THREE.MeshLambertMaterial({ color: COLORS[key] });
 }
 
+// TWO EXTRA MATERIALS, FOR THE FRONT OF THE SHOP.
+//
+// The sun in main.js comes from the south-west and the shop's door faces north
+// up the road, away from it - so the whole shop front was in shade, and a warm
+// cream wall came out looking grey and unwelcoming.
+//
+// The cheap fix is "emissive": a colour a material gives off by itself, on top
+// of whatever light lands on it. Here it is the wall's OWN colour turned down
+// to 15% (that is what emissiveIntensity does), which reads as a wall in bright
+// daylight rather than a glowing one, and it costs the graphics card nothing at
+// all - no second light, no shadows, no extra passes. (Turning the sky light up
+// instead would have brightened the whole world, including all the sunny sides
+// that already looked right.)
+const LIT_FRACTION = 0.15;
+
+function litVersion(color) {
+  return new THREE.MeshLambertMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: LIT_FRACTION,
+  });
+}
+
+M.shopWallLit = litVersion(COLORS.shopWall);
+M.shopTrimLit = litVersion(COLORS.shopTrim);
+
 // ---------------------------------------------------------------------------
 // Shared geometries. Every one of these is made exactly once and then used by
 // dozens of meshes. The road slabs use a plain 1x1x1 box that each mesh simply
@@ -500,13 +526,18 @@ function buildStore(x, z) {
   store.add(box(STORE_WIDTH, wallHeight, STORE_DEPTH, 0, wallHeight / 2, 0, M.shopWall));
   store.add(box(STORE_WIDTH + 1, 0.5, STORE_DEPTH + 1, 0, wallHeight + 0.25, 0, M.shopRoof));
 
+  // The front wall gets a paper-thin panel of the "lit" cream laid over it, so
+  // the face the player always sees is bright and welcoming while the other
+  // three walls keep their ordinary paint. (See litVersion above.)
+  store.add(box(STORE_WIDTH, wallHeight, 0.04, 0, wallHeight / 2, front - 0.02, M.shopWallLit));
+
   // The door, big and obvious, in the middle of the front wall.
   store.add(box(2.4, 3.1, 0.14, 0, 1.55, front - 0.05, M.shopDoor));
-  store.add(box(2.8, 3.5, 0.08, 0, 1.75, front - 0.01, M.shopTrim));  // white surround
+  store.add(box(2.8, 3.5, 0.08, 0, 1.75, front - 0.01, M.shopTrimLit));  // white surround
 
   // A window each side of the door.
-  store.add(box(1.6, 1.3, 0.1, -3.4, 2.6, front - 0.05, M.shopTrim));
-  store.add(box(1.6, 1.3, 0.1, 3.4, 2.6, front - 0.05, M.shopTrim));
+  store.add(box(1.6, 1.3, 0.1, -3.4, 2.6, front - 0.05, M.shopTrimLit));
+  store.add(box(1.6, 1.3, 0.1, 3.4, 2.6, front - 0.05, M.shopTrimLit));
 
   // The awning: eight thin boxes in two alternating colours, tilted so they
   // slope down away from the wall like a real shop blind.

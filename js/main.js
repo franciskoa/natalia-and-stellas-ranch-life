@@ -11,7 +11,13 @@
 // barn door to open the barn menu and dress them up. The whole ranch is saved
 // into the browser, so closing the tab and coming back finds everything where
 // it was left.
-// Phase 5 (this slice): a pocket with coins and two different kinds of feed,
+// Phase 5 (last slice): a market stall just outside the ranch gate, where a
+// friendly buyer finds her chickens a happy new home for 10 coins each and
+// takes her spare eggs off her hands at 2 coins apiece. The chicks the store
+// sells now have to GROW UP before they can be sold or lay anything, so buying
+// a chick for 8 and selling it for 10 is not a way to print money.
+//
+// Phase 5 (earlier slices): a pocket with coins and two different kinds of feed,
 // shown as a little row of numbers in the top-left corner, and a chicken coop
 // beside the house - four chickens pottering about a fenced pen, a shared
 // hunger bar over the hen house, and eggs to collect. Plus a scenic road
@@ -23,6 +29,7 @@
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
 import { buildRoad, updateCompass } from './road.js';
+import { buildMarketStall } from './market.js';
 import { makeNatalia, makeStella, updateFollower } from './characters.js';
 import { createControls } from './controls.js';
 import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
@@ -130,6 +137,14 @@ const world = buildWorld(scene);
 // ---------------------------------------------------------------------------
 const road = buildRoad(scene);
 
+// ---------------------------------------------------------------------------
+// The market stall, just outside the ranch gate on the west side of the road.
+// market.js builds the stall itself and hands back its footprint (for the
+// collision list) and the spot in front of the counter (for the E prompt); the
+// panel of things to sell is further down, next to the store's.
+// ---------------------------------------------------------------------------
+const market = buildMarketStall({ scene });
+
 // Where "home" is, for the compass: the patch of yard the game starts on.
 const RANCH_POSITION = { x: 0, z: 8 };
 
@@ -200,6 +215,11 @@ controls.addBlockBox(coop.penBox);
 // because loading uses the same list to shove Natalia out of anything she
 // would have been standing inside.
 controls.addBlockBox(road.storeBox);
+
+// The market stall is solid too. Its footprint is x -10.8..-7.2, z 17.2..22.8,
+// which leaves the road corridor (x -2.5..2.5) completely clear - so no matter
+// how the stall is drawn, it can never get in the way of the ride to the store.
+controls.addBlockBox(market.box);
 
 // ---------------------------------------------------------------------------
 // Natalia's pocket: her coins, her two kinds of feed and her eggs. It starts
@@ -497,18 +517,21 @@ const STORE_ITEMS = [
     canBuy: () => (coop.count() < MAX_CHICKENS ? true : 'The coop is full!'),
     refused: 'The coop is full!',
     give: () => {
+      // A CHICK, not a chicken: it arrives small and yellow and spends a minute
+      // and a half growing up before it can lay an egg or find a new home.
       // addChicken hands back null when there is no room, and then nothing is
       // charged (see the note above).
-      if (!coop.addChicken()) return false;
+      if (!coop.addChicken({ chick: true })) return false;
       // Chickens are not an inventory item, so the HUD has to be told.
       hud.refresh();
-      return `A new chick! (🐔 ${coop.count()})`;
+      return `A fluffy new chick! It needs time to grow. (🐔 ${coop.count()})`;
     },
   },
 ];
 
 const shopMenu = createShopMenu({
   title: 'The Feed Store',
+  name: 'store',
   intro: 'Everything a ranch needs.',
   items: STORE_ITEMS,
   inventory,
@@ -544,6 +567,120 @@ interactions.register({
       onPress: () => {
         if (riding.isRiding()) return;   // the label already said why
         shopMenu.open();
+      },
+    },
+  ],
+});
+
+// ---------------------------------------------------------------------------
+// THE MARKET STALL, just outside the ranch gate.
+//
+// It is the same panel as the store, built by the same file, with mode: 'sell'
+// - so instead of checking she can afford a row and taking coins off her, it
+// takes the goods away and PAYS her, and every button says "Sell".
+//
+// One thing matters more here than anywhere else in the game: this is a market
+// stall and nothing else. A chicken sold here is a chicken a family takes home
+// with them, and the words on the screen say exactly that.
+//
+// The prices:
+//   chicken  10 coins   (a chick from the store costs 8, but has to grow first)
+//   egg       2 coins   (one at a time, or the whole basket at once)
+// ---------------------------------------------------------------------------
+const CHICKEN_PRICE = 10;
+const EGG_PRICE = 2;
+
+const MARKET_ITEMS = [
+  {
+    key: 'chicken',
+    label: 'Chicken',
+    icon: '🐔',
+    price: CHICKEN_PRICE,
+    // She must always keep at least one grown chicken, or the coop would stand
+    // empty and there would be no more eggs. Chicks do not count: they are far
+    // too young to go and live anywhere else.
+    canBuy: () =>
+      coop.adultCount() >= 2 ? true : 'Keep at least one chicken!',
+    refused: 'Keep at least one chicken!',
+    give: () => {
+      // removeChicken only ever takes a GROWN chicken, and says false if there
+      // are none - in which case nothing is paid (see the note by the store).
+      if (!coop.removeChicken()) return false;
+      // Chickens are not an inventory item, so the HUD has to be told.
+      hud.refresh();
+      return `A family took a chicken home! (🐔 ${coop.count()} left)`;
+    },
+  },
+  {
+    key: 'egg',
+    label: '1 egg',
+    icon: '🥚',
+    price: EGG_PRICE,
+    canBuy: () => (inventory.get('eggs') >= 1 ? true : 'No eggs yet'),
+    refused: 'No eggs yet',
+    give: () => {
+      if (!inventory.spend('eggs', 1)) return false;
+      return `Sold an egg! (🥚 ${inventory.get('eggs')} left)`;
+    },
+  },
+  {
+    key: 'eggsAll',
+    icon: '🥚',
+    // Both the words and the price are FUNCTIONS here, because they change
+    // every time an egg is collected or sold. shop.js reads the price once,
+    // before the eggs change hands, so the whole basket is paid for.
+    label: () => `All eggs (${inventory.get('eggs')})`,
+    price: () => inventory.get('eggs') * EGG_PRICE,
+    canBuy: () => (inventory.get('eggs') >= 1 ? true : 'No eggs yet'),
+    refused: 'No eggs yet',
+    buttonLabel: 'Sell all',
+    give: () => {
+      const eggs = inventory.get('eggs');
+      if (eggs < 1) return false;
+      if (!inventory.spend('eggs', eggs)) return false;
+      return `The baker took all ${eggs} of them! (🪙 +${eggs * EGG_PRICE})`;
+    },
+  },
+];
+
+const marketMenu = createShopMenu({
+  title: 'The Market Stall',
+  name: 'market',
+  intro: 'Find your chickens a happy new home.',
+  items: MARKET_ITEMS,
+  inventory,
+  controls,
+  interactions,
+  mode: 'sell',
+  // After every sale: redraw the row of numbers and write the ranch out, so a
+  // sold chicken never comes back because the tab was closed a second later.
+  onBuy: () => {
+    hud.refresh();
+    saveAndShow();
+  },
+});
+
+// The spot in front of the counter, on the road side of the stall. market.js
+// made it for us; it is an empty object with nothing to draw, exactly like the
+// barn door and shop door markers.
+//
+// A radius of 3.5 gives her a comfortable patch of grass between the road and
+// the counter: the stall's own footprint stops her 1.2 units short of the
+// marker, and the edge of the road is 3.5 units the other way, so the prompt
+// appears just as she steps off the road towards the stall.
+interactions.register({
+  object: market.anchor,
+  radius: 3.5,
+  actions: [
+    {
+      key: 'KeyE',
+      getLabel: () => 'Visit the market stall',
+      onPress: () => {
+        // You cannot lean down from a horse to hand over a chicken. (While she
+        // is in the saddle the horse itself is the nearest thing anyway, so
+        // what she actually sees is "E: Get off".)
+        if (riding.isRiding()) return;
+        marketMenu.open();
       },
     },
   ],
@@ -662,8 +799,8 @@ function update(dt) {
   const chickensBefore = coop.count();
   coop.update(dt, camera);
   // Chickens are not an inventory item, so the HUD only hears about them when
-  // we tell it. (Nothing adds or removes chickens yet - the market stall in
-  // the next slice will - but the wiring is here and ready for it.)
+  // we tell it. (The store and the market stall tell it themselves; this is
+  // the safety net for anything else that changes the flock.)
   if (coop.count() !== chickensBefore) hud.refresh();
 
   // 6. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
@@ -674,6 +811,7 @@ function update(dt) {
   //    alters.
   barnMenu.update(dt);
   shopMenu.update(dt);
+  marketMenu.update(dt);
   // 8. Turn the little compass arrow at the top of the screen. While she is
   //    riding, Natalia is a child of the horse, and updateCompass reads her
   //    WORLD position, so it points the right way either way.
@@ -722,8 +860,10 @@ window.ranch = {
   interactions,
   riding,
   road,
+  market,
   barnMenu,
   shopMenu,
+  marketMenu,
   renderer,
   update,
   save,

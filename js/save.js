@@ -19,11 +19,21 @@
 //
 // Version 1 (Phase 4) held the player and the horses.
 // Version 2 (Phase 5) adds her pocket (coins and feed) and the chicken coop.
+// Version 3 (Phase 5, market stall) adds coop.chicks: a list with one number in
+//   it per chick in the pen - how many seconds that chick still has to grow
+//   before it is a full chicken.
 //
-// A version 1 save still loads: the parts it does not have simply get the
-// new-game defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, and four
-// chickens with a full bar). Nobody loses the horses they dressed up in
+// Older saves still load. The parts they do not have simply get the new-game
+// defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, four chickens with
+// a full bar), and a save with no "chicks" list means what it says: every
+// chicken in that pen is grown up. Nobody loses the horses they dressed up in
 // Phase 4 just because the game learned about chickens.
+//
+// WHY BUMP THE NUMBER RATHER THAN QUIETLY ADD THE FIELD? Because the version is
+// the one place that says what a save is meant to contain, and "3" is how a
+// future slice can tell a save that knows about chicks from one that predates
+// them. Reading old saves costs nothing (OLDEST_READABLE_VERSION is still 1),
+// so there is no reason not to be honest about the shape.
 // ---------------------------------------------------------------------------
 //
 // ---------------------------------------------------------------------------
@@ -49,7 +59,7 @@ import { STARTING_INVENTORY } from './inventory.js';
 export const SAVE_KEY = 'ranchLifeSave';
 
 // The shape of the save file we WRITE.
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 // The oldest shape we can still READ. Anything between this and SAVE_VERSION
 // is loaded and quietly brought up to date (see applyState).
@@ -62,6 +72,7 @@ const DEFAULT_COOP = {
   chickens: 4,
   eggsOnGround: 0,
   eggTimer: 0,
+  chicks: [],      // no chicks: the four starting chickens are all grown up
 };
 
 // Hunger runs 0..100, the same as in horse.js.
@@ -188,7 +199,7 @@ export function clearSave() {
 //       ...
 //     ],
 //     inventory: { coins, horseFeed, chickenFeed, eggs },
-//     coop: { hunger, chickens, eggsOnGround, eggTimer }
+//     coop: { hunger, chickens, eggsOnGround, eggTimer, chicks: [12.5, ...] }
 //   }
 //
 // Note there is no y: everybody stands on flat grass, so y is always 0.
@@ -248,8 +259,9 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
     inventory: inventory ? inventory.all() : { ...STARTING_INVENTORY },
 
     // The coop: one shared hunger, how many chickens are in the pen, how many
-    // eggs are lying about waiting to be picked up, and how far along the
-    // next egg is. chickens.js builds this for us with getState().
+    // eggs are lying about waiting to be picked up, how far along the next egg
+    // is, and how much growing each chick has left to do. chickens.js builds
+    // this for us with getState().
     coop: coop ? coop.getState() : { ...DEFAULT_COOP },
   };
 }

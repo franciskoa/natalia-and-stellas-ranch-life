@@ -15,6 +15,7 @@
 //
 //   const shop = createShopMenu({
 //     title: 'The Store',
+//     name: 'store',                           // becomes data-shop on the panel
 //     intro: 'Everything a ranch needs.',      // optional line under the title
 //     items: [ ... see below ... ],
 //     inventory,                               // from inventory.js
@@ -32,6 +33,13 @@
 //     label:  'Horse feed',       // the words on the row
 //     icon:   '🌾',               // one emoji, shown big on the left
 //     price:  5,                  // in coins
+//
+//     // label and price may each be a FUNCTION instead of a plain value, for a
+//     // row whose words or price change while the panel is open:
+//     //   label: () => `All eggs (${inventory.get('eggs')})`,
+//     //   price: () => inventory.get('eggs') * 2,
+//     // The price is read once, before give() runs, so selling everything in
+//     // the basket still pays for everything that was in it.
 //
 //     // Optional. Say why this row cannot be used right now, as a short line
 //     // the player can read ("The coop is full!"). true means "go ahead".
@@ -84,12 +92,28 @@ function coinsOf(value) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// An item's label or price, which is allowed to be either a plain value or a
+// function that works one out fresh every time we ask. The market stall needs
+// the second kind for its "All eggs (3)" row, where both the words and the
+// price change as the basket fills up. A function that throws is treated as if
+// it were not there at all, so one bad row cannot take the panel down.
+function readValue(value, fallback) {
+  if (typeof value !== 'function') return value ?? fallback;
+  try {
+    const answer = value();
+    return answer ?? fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // createShopMenu - build one panel and hand back the four things the rest of
 // the game needs: open, close, isOpen and update.
 // ---------------------------------------------------------------------------
 export function createShopMenu({
   title = 'Store',
+  name,
   intro,
   items = [],
   inventory,
@@ -112,6 +136,9 @@ export function createShopMenu({
   // root is the dark sheet over the whole screen; panel is the rounded box in
   // the middle of it. Both classes come straight from the barn menu.
   const root = div('barn-menu shop-menu');
+  // A handle for tests, and a way to tell the two panels apart in the page:
+  //   document.querySelector('.shop-menu[data-shop="market"] .shop-buy')
+  root.dataset.shop = name ?? (selling ? 'sell' : 'buy');
 
   const panel = div('barn-panel');
   root.appendChild(panel);
@@ -144,8 +171,12 @@ export function createShopMenu({
     // The middle column: the name, the price, and (when something is in the
     // way) a short line saying what.
     const text = div('shop-item-text');
-    text.appendChild(div('shop-item-label', item.label ?? item.key ?? 'Thing'));
-    text.appendChild(div('shop-item-price', `🪙 ${coinsOf(item.price)}`));
+    // The words and the price are filled in by refresh() below, because either
+    // of them may be a function whose answer changes while the panel is open.
+    const labelLine = div('shop-item-label', '');
+    const priceLine = div('shop-item-price', '');
+    text.appendChild(labelLine);
+    text.appendChild(priceLine);
     const whyLine = div('shop-item-why', '');
     text.appendChild(whyLine);
     row.appendChild(text);
@@ -160,7 +191,16 @@ export function createShopMenu({
     row.appendChild(button);
 
     list.appendChild(row);
-    rows.push({ item, row, button, whyLine });
+    rows.push({ item, row, button, whyLine, labelLine, priceLine });
+  }
+
+  // The words on a row ("Chicken", "All eggs (3)"), and what it is worth.
+  function labelOf(item) {
+    return String(readValue(item.label, item.key ?? 'Thing'));
+  }
+
+  function priceOf(item) {
+    return coinsOf(readValue(item.price, 0));
   }
 
   // --- the line that answers back -------------------------------------------
@@ -196,7 +236,7 @@ export function createShopMenu({
     }
 
     // Buying costs coins; selling earns them, so there is nothing to afford.
-    if (!selling && inventory && inventory.get('coins') < coinsOf(item.price)) {
+    if (!selling && inventory && inventory.get('coins') < priceOf(item)) {
       return 'Not enough coins';
     }
 
@@ -221,6 +261,15 @@ export function createShopMenu({
       return;
     }
 
+    // Work the price out BEFORE anything changes hands. It matters for a row
+    // whose price is a function: "All eggs (3)" is worth 6 coins, but the
+    // moment give() has handed the eggs over there are none left and the same
+    // sum would come to nothing.
+    const price = priceOf(item);
+    // Same for the words, so the fallback line further down still says what was
+    // actually sold.
+    const words = labelOf(item);
+
     // Hand the goods over FIRST, and only take the money once that has worked.
     // Doing it in this order means a purchase that turns out to be impossible
     // (the coop filled up a moment ago) costs nothing at all.
@@ -235,7 +284,6 @@ export function createShopMenu({
 
     // The coins. An item with its own onPress has already done whatever it
     // wanted with them, so we leave it alone.
-    const price = coinsOf(item.price);
     if (typeof item.onPress !== 'function' && inventory && price > 0) {
       if (selling) inventory.add('coins', price);
       else inventory.spend('coins', price);
@@ -245,9 +293,7 @@ export function createShopMenu({
     // (🌾 4)"); this is the fallback for one that does not bother.
     const done = selling ? 'Sold' : 'Bought';
     say(
-      typeof result === 'string' && result
-        ? result
-        : `${done} ${item.label ?? 'it'}!`,
+      typeof result === 'string' && result ? result : `${done} ${words}!`,
       true
     );
 
@@ -262,6 +308,11 @@ export function createShopMenu({
     coinsLine.textContent = `You have 🪙 ${inventory ? inventory.get('coins') : 0}`;
 
     for (const entry of rows) {
+      // The words and the price first: a row like "All eggs (3)" has to redraw
+      // itself every time anything changes.
+      entry.labelLine.textContent = labelOf(entry.item);
+      entry.priceLine.textContent = `🪙 ${priceOf(entry.item)}`;
+
       const why = blockedReason(entry.item);
       entry.button.disabled = !!why;
       entry.row.classList.toggle('shop-item-off', !!why);

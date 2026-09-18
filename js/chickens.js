@@ -19,9 +19,15 @@
 //   penBox            { minX, maxX, minZ, maxZ } - the pen on the ground
 //   gate              an empty Object3D at the gate, for interact.js to
 //                     measure distances to
-//   addChicken()      -> the new chicken (up to MAX_CHICKENS)
-//   removeChicken()   -> true if one was taken away, false if the pen is empty
-//   count()           -> how many chickens are in the pen
+//   addChicken(opts)  -> the new chicken (up to MAX_CHICKENS).
+//                        addChicken({ chick: true }) puts a small yellow CHICK
+//                        in the pen instead, which grows into a full chicken
+//                        over ninety seconds.
+//   removeChicken()   -> true if a GROWN chicken was taken away, false if there
+//                        were none (a chick is too young to go anywhere)
+//   count()           -> how many chickens are in the pen, chicks included
+//   adultCount()      -> how many of those are grown up. Only grown chickens
+//                        lay eggs, and only grown chickens can be sold.
 //   hunger / setHunger(v) / isHungry()
 //                     -> the one shared hunger, 0..100 (it also lives at
 //                        coop.group.userData.hunger)
@@ -78,6 +84,18 @@ const HEAD_BOB_RATE = 9;        // how fast the head bobs while walking
 const HEAD_BOB_SIZE = 0.035;    // how far it bobs, in units
 const HOP_SECONDS = 0.5;        // the happy hop after being fed
 const HOP_HEIGHT = 0.28;
+
+// CHICKS. A chick bought at the store costs 8 coins and a grown chicken sells
+// for 10 at the market stall, so if a chick were grown-up the moment it was
+// bought you could stand between the two shops making free money forever.
+// Making it GROW fixes that: for a minute and a half it is a small yellow ball
+// of fluff that cannot lay an egg and cannot be sold, and then it is a chicken.
+export const GROW_SECONDS = 90;
+// How big a brand new chick is next to a grown chicken. It lerps from this up
+// to 1 over those ninety seconds, so it visibly gets bigger while you watch.
+export const CHICK_SCALE = 0.55;
+// Chick colours: the soft yellow every picture book uses.
+const CHICK_COAT = { body: 0xffe082, wing: 0xffd54f };
 
 // How much room a chicken keeps between itself and the pen fence, so nobody
 // ever pokes a beak through the rails.
@@ -174,12 +192,19 @@ function buildChicken(coat) {
   const bodyMaterial = coatMaterial(coat.body);
   const wingMaterial = coatMaterial(coat.wing);
 
+  // The meshes painted in the two coat colours are collected as we go, so that
+  // a chick can be repainted yellow now and repainted back in its grown-up
+  // colours the moment it is old enough (see dressChicken below).
+  const skin = [];       // body and head: the "body" colour
+  const feathers = [];   // wings and tail: the "wing" colour
+
   // Body: a sphere squashed a little and stretched along Z, which reads as a
   // plump little hen.
   const body = new THREE.Mesh(bodyGeo, bodyMaterial);
   body.position.y = 0.24;
   body.scale.set(1.0, 0.92, 1.25);
   lift.add(body);
+  skin.push(body);
 
   // A wing on each side, flat against the body.
   for (const side of [-1, 1]) {
@@ -187,6 +212,7 @@ function buildChicken(coat) {
     wing.position.set(side * 0.13, 0.25, 0.01);
     wing.scale.set(0.35, 0.8, 1.15);
     lift.add(wing);
+    feathers.push(wing);
   }
 
   // Tail: a little cone tipped up and back.
@@ -194,13 +220,16 @@ function buildChicken(coat) {
   tail.position.set(0, 0.32, -0.19);
   tail.rotation.x = -2.2;
   lift.add(tail);
+  feathers.push(tail);
 
   // Head on a short neck, towards the front (+Z). It bobs while she walks.
   const head = new THREE.Group();
   head.position.set(0, 0.36, 0.13);
   lift.add(head);
 
-  head.add(new THREE.Mesh(headGeo, bodyMaterial));
+  const skull = new THREE.Mesh(headGeo, bodyMaterial);
+  head.add(skull);
+  skin.push(skull);
 
   // Beak: a cone tipped over so its point aims forwards.
   const beak = new THREE.Mesh(beakGeo, M.beak);
@@ -239,9 +268,55 @@ function buildChicken(coat) {
     waitTimer: between(WAIT_MIN, WAIT_MAX),  // stand still for a moment first
     bobPhase: Math.random() * Math.PI * 2,   // so they do not bob in unison
     hopTimer: 0,
+    // Growing up. isChick is the one the rest of the game asks about; growTimer
+    // is how many seconds of being small are left.
+    isChick: false,
+    growTimer: 0,
+    // The meshes to repaint, and the grown-up colours to repaint them in.
+    skin,
+    feathers,
+    adultBody: bodyMaterial,
+    adultWing: wingMaterial,
   };
 
   return chicken;
+}
+
+// ---------------------------------------------------------------------------
+// GROWING UP - three little helpers that turn a chicken into a chick and back.
+// ---------------------------------------------------------------------------
+
+// Repaint one chicken in a pair of colours.
+function dressChicken(chicken, bodyMaterial, wingMaterial) {
+  for (const mesh of chicken.userData.skin) mesh.material = bodyMaterial;
+  for (const mesh of chicken.userData.feathers) mesh.material = wingMaterial;
+}
+
+// How big this chicken should be right now: CHICK_SCALE when it has just been
+// bought, growing smoothly to full size as its timer runs down.
+function applyGrowScale(chicken) {
+  const left = Math.max(0, Math.min(GROW_SECONDS, chicken.userData.growTimer));
+  const grown = 1 - left / GROW_SECONDS;   // 0 = brand new, 1 = all grown up
+  chicken.scale.setScalar(CHICK_SCALE + (1 - CHICK_SCALE) * grown);
+}
+
+// Turn a chicken into a chick with this many seconds of growing left.
+function makeChick(chicken, secondsLeft = GROW_SECONDS) {
+  const seconds = Number(secondsLeft);
+  chicken.userData.isChick = true;
+  chicken.userData.growTimer = Number.isFinite(seconds)
+    ? Math.max(0, Math.min(GROW_SECONDS, seconds))
+    : GROW_SECONDS;
+  dressChicken(chicken, coatMaterial(CHICK_COAT.body), coatMaterial(CHICK_COAT.wing));
+  applyGrowScale(chicken);
+}
+
+// All grown up: full size, and back in its own colours.
+function growUp(chicken) {
+  chicken.userData.isChick = false;
+  chicken.userData.growTimer = 0;
+  dressChicken(chicken, chicken.userData.adultBody, chicken.userData.adultWing);
+  chicken.scale.setScalar(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +489,9 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
   const eggs = [];
 
   // --- chickens -------------------------------------------------------------
-  function addChicken() {
+  // addChicken()                  a grown chicken, ready to lay and to sell
+  // addChicken({ chick: true })   a small yellow chick that grows up in 90s
+  function addChicken({ chick = false, growSeconds = GROW_SECONDS } = {}) {
     if (chickens.length >= MAX_CHICKENS) return null;
 
     // The coats are used in turn, so a new chicken is rarely the same colour
@@ -432,20 +509,49 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
     chicken.userData.targetX = target.x - centreX;
     chicken.userData.targetZ = target.z - centreZ;
 
+    // A chick starts small and yellow. Everything else about it - where it
+    // walks, how it bobs its head - is exactly the same as a grown chicken.
+    if (chick) makeChick(chicken, growSeconds);
+
     group.add(chicken);
     chickens.push(chicken);
     return chicken;
   }
 
+  // Take a GROWN chicken out of the pen: the newest one first. This is what the
+  // market stall calls, and it is why a chick can never be sold - it simply is
+  // not one of the chickens this function will pick. false means "there are no
+  // grown chickens in here".
   function removeChicken() {
+    for (let i = chickens.length - 1; i >= 0; i--) {
+      if (chickens[i].userData.isChick) continue;
+      const [chicken] = chickens.splice(i, 1);
+      group.remove(chicken);
+      return true;
+    }
+    return false;
+  }
+
+  // Take the last chicken out whether it is grown or not. Only loading a save
+  // file uses this, to shrink the flock down to the size the save says.
+  function removeAnyChicken() {
     const chicken = chickens.pop();
     if (!chicken) return false;
     group.remove(chicken);
     return true;
   }
 
+  // Everything in the pen, chicks included: this is the number on the HUD.
   function count() {
     return chickens.length;
+  }
+
+  // Just the grown-up ones. They are the only chickens that lay eggs, and the
+  // only ones the market stall will take.
+  function adultCount() {
+    let grown = 0;
+    for (const chicken of chickens) if (!chicken.userData.isChick) grown++;
+    return grown;
   }
 
   // --- eggs -----------------------------------------------------------------
@@ -519,6 +625,14 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
   function updateChicken(chicken, step) {
     const data = chicken.userData;
 
+    // Growing up: the timer runs down, the chick gets a little bigger every
+    // frame, and when the timer reaches zero it turns into a proper chicken.
+    if (data.growTimer > 0) {
+      data.growTimer -= step;
+      if (data.growTimer <= 0) growUp(chicken);
+      else applyGrowScale(chicken);
+    }
+
     // The happy hop after being fed: up and down once, because sin() runs
     // 0 -> 1 -> 0 over half a turn.
     if (data.hopTimer > 0) {
@@ -589,9 +703,12 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
 
     // 3. Laying. Two chickens between them lay an egg every twenty seconds, so
     //    the timer counts up at "half a second per chicken per second". Hungry
-    //    chickens (below 30) stop laying until they have been fed.
-    if (group.userData.hunger > EGG_HUNGER_FLOOR && chickens.length > 0) {
-      group.userData.eggTimer += step * chickens.length / 2;
+    //    chickens (below 30) stop laying until they have been fed, and chicks
+    //    are far too young to lay anything at all - hence adultCount() here
+    //    rather than the whole flock.
+    const layers = adultCount();
+    if (group.userData.hunger > EGG_HUNGER_FLOOR && layers > 0) {
+      group.userData.eggTimer += step * layers / 2;
       // ">=" rather than ">": adding up lots of little dt steps lands on
       // exactly 20 often enough that a strict ">" would skip an egg.
       while (group.userData.eggTimer >= EGG_SECONDS) {
@@ -611,6 +728,11 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
       chickens: chickens.length,
       eggsOnGround: eggs.length,
       eggTimer: group.userData.eggTimer,
+      // One number per chick: how many seconds of growing it has left. An empty
+      // list (the usual case) means every chicken in the pen is grown up.
+      chicks: chickens
+        .filter((chicken) => chicken.userData.isChick)
+        .map((chicken) => Math.round(chicken.userData.growTimer * 10) / 10),
     };
   }
 
@@ -623,8 +745,24 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
     const wanted = Math.max(
       0, Math.min(MAX_CHICKENS, Math.floor(Number(state.chickens) || 0))
     );
-    while (chickens.length > wanted) removeChicken();
+    while (chickens.length > wanted) removeAnyChicken();
     while (chickens.length < wanted) addChicken();
+
+    // Everybody starts grown up, and then the chicks the save file remembers
+    // are made small again. A save from before chicks existed (version 2 and
+    // older) simply has no "chicks" list, so the whole flock stays grown - which
+    // is exactly right, because back then they all were.
+    for (const chicken of chickens) {
+      if (chicken.userData.isChick) growUp(chicken);
+    }
+
+    const chicks = Array.isArray(state.chicks) ? state.chicks : [];
+    for (let i = 0; i < chicks.length && i < chickens.length; i++) {
+      const left = Number(chicks[i]);
+      if (!Number.isFinite(left) || left <= 0) continue;
+      // Counting back from the end, so the chicks are the newest arrivals.
+      makeChick(chickens[chickens.length - 1 - i], left);
+    }
 
     setEggsOnGround(state.eggsOnGround);
 
@@ -653,6 +791,7 @@ export function createCoop({ scene, position, chickens: startCount = START_CHICK
     addChicken,
     removeChicken,
     count,
+    adultCount,
     getHunger,
     setHunger,
     isHungry,
