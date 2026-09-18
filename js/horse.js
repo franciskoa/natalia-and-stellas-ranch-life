@@ -715,6 +715,31 @@ export function feedHorse(horse) {
 }
 
 // ---------------------------------------------------------------------------
+// treatHorse - a nibble rather than a meal: top the bar up by "amount" instead
+// of filling it right to the brim.
+//
+// Phase 7 uses it for the carrots Natalia grows in her garden. A carrot is a
+// TREAT, not a proper feed: it puts about a third of the bar back, so three of
+// them do the job of one sack of oats. That keeps the store worth riding to -
+// and it means a carrot is never the wrong thing to give a horse, only a
+// smaller thing.
+//
+// Returns true if the horse actually needed it, and false if it was already
+// full, exactly like feedHorse above.
+// ---------------------------------------------------------------------------
+export function treatHorse(horse, amount) {
+  if (!isHungry(horse)) return false;
+
+  const top = Number(amount);
+  const added = Number.isFinite(top) && top > 0 ? top : 0;
+
+  horse.userData.hunger = Math.min(MAX_HUNGER, horse.userData.hunger + added);
+  horse.userData.feedTimer = FEED_BOB_SECONDS;  // the same happy head-bob
+  refreshBar(horse);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // isHungry - true whenever the bar is not completely full.
 // ---------------------------------------------------------------------------
 export function isHungry(horse) {

@@ -17,11 +17,20 @@
 // sells now have to GROW UP before they can be sold or lay anything, so buying
 // a chick for 8 and selling it for 10 is not a way to print money.
 //
-// Phase 7 (this slice): foals. Two grown-up horses, two sacks of horse feed and
-// the big "Have a foal!" button in the barn menu, and a little foal is standing
-// outside the barn door - in a coat colour nobody chose. It cannot be ridden
-// until it has spent four minutes growing up, but it can be fed and it gets
-// hungry like every other horse. The ranch holds eight horses in all.
+// Phase 7 (earlier slice): foals. Two grown-up horses, two sacks of horse feed
+// and the big "Have a foal!" button in the barn menu, and a little foal is
+// standing outside the barn door - in a coat colour nobody chose. It cannot be
+// ridden until it has spent four minutes growing up, but it can be fed and it
+// gets hungry like every other horse. The ranch holds eight horses in all.
+//
+// Phase 7 (this slice): the vegetable garden. Six plots of earth behind a low
+// wooden edging in the south-west corner of the yard, with a scarecrow at one
+// end and a painted sign at the other. E plants corn in a bare plot and F plants
+// carrots; a minute or so later (ninety seconds for corn, sixty for carrots)
+// the plant is grown and E picks three of them. There is no watering and no
+// withering: a seed that goes into the ground always becomes a crop, however
+// long she wanders off for. The store sells both kinds of seed, the market stall
+// buys carrots, and a carrot is also a nice treat for a hungry horse.
 //
 // Phase 6: four neighbour farms out along the road - the Garcias' corn, the
 // Millers' cows, the Nguyens' sheep and the Okafors' apples - and a trade panel
@@ -46,7 +55,7 @@ import { buildMarketStall } from './market.js';
 import { buildNeighbors, PERSON_BLOCK_RADIUS, TALK_RADIUS } from './neighbors.js';
 import { makeNatalia, makeStella, updateFollower } from './characters.js';
 import { createControls } from './controls.js';
-import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
+import { createHorse, updateHorse, feedHorse, treatHorse, isHungry } from './horse.js';
 import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
 import { createBarnMenu } from './menu.js';
@@ -55,6 +64,7 @@ import { createShopMenu } from './shop.js';
 import { createTradeMenu } from './trade.js';
 import { createInventory, createHud, ITEM_ICONS } from './inventory.js';
 import { createCoop, MAX_CHICKENS } from './chickens.js';
+import { createGarden, CROPS } from './garden.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
@@ -204,6 +214,34 @@ const COOP_POSITION = new THREE.Vector3(-12, 0, 2);
 const coop = createCoop({ scene, position: COOP_POSITION });
 
 // ---------------------------------------------------------------------------
+// THE VEGETABLE GARDEN (Phase 7): six plots of earth in the south-west corner
+// of the yard, at (-12, 0, 9).
+//
+// WHY THERE. The yard is a busy place, and the garden had to stay out of the
+// way of every single thing that already happens in it:
+//
+//   the house          x -15.5..-8.5, z -11.5..-4.5
+//   the dirt path      z -7.1..-3.9, running house door -> barn door
+//   the chicken pen    x -16..-8, z -1..5, with its gate at (-8, 2)
+//   the barn           x 8.5..19.5, z -14.5..-5.5, its door spot at (14, -4.5)
+//   the foal spots     all six of them east of x = 9 (see breeding.js)
+//   the three horses   (6, 4), (12, 2) and (16, 6)
+//   the gate and road  the gap in the front fence at x -4..4, z 14
+//   the market stall   x -10.8..-7.2, z 17.2..22.8, outside the fence
+//
+// The patch of grass south of the chicken pen is the one big empty corner left,
+// and it is a fourteen-second walk from the house door - so the garden sits
+// there, from x -15.6..-8.4 and z 6.2..11.8, with the scarecrow a little
+// further west and the sign a little further east.
+//
+// NOTHING ABOUT IT IS SOLID. There is no addBlockBox call here and there never
+// should be: she walks straight over the edging and stands on the earth itself
+// to plant. That is what makes it impossible for the garden to block anything.
+// ---------------------------------------------------------------------------
+const GARDEN_POSITION = new THREE.Vector3(-12, 0, 9);
+const garden = createGarden({ scene, position: GARDEN_POSITION });
+
+// ---------------------------------------------------------------------------
 // The girls. Both stand in the yard in front of the house and the barn, which
 // are off towards -Z, so they start turned that way (rotation.y = PI faces -Z).
 // ---------------------------------------------------------------------------
@@ -232,6 +270,14 @@ const controls = createControls(natalia, camera, renderer.domElement, world.boun
 // ridden.) A small horse gets a small circle, so you can stand closer to the
 // pony - and closer still to a foal, until it grows.
 const HORSE_BLOCK_RADIUS = 1.6;
+
+// How much of a horse's hunger bar one carrot puts back. A sack of oats fills
+// the whole thing (100), so a carrot is worth about a third of a meal: three
+// carrots do the job of one sack. That keeps the ride to the store worth making
+// - a sack costs 5 coins and three carrots would fetch 9 at the market stall -
+// while making sure that a child who has run out of oats is never stuck with a
+// hungry horse and nothing to do about it.
+const CARROT_TREAT = 34;
 
 // The chicken pen is a rectangle nobody may walk into - not Natalia, and not a
 // horse she is riding. She talks to the chickens over the gate.
@@ -357,8 +403,20 @@ function registerHorseInteractions(horse) {
         // is how many sacks of horse feed are left in her pocket. A foal eats
         // exactly like a grown horse - being little is no excuse for being
         // hungry.
-        getLabel: () =>
-          isHungry(horse) ? `Feed ${data.name} (🌾 ${inventory.get('horseFeed')})` : '',
+        //
+        // OUT OF OATS? Then F offers a CARROT from the garden instead, if she
+        // has one (see the note by CARROT_TREAT below). The oats always come
+        // first, because a sack is a proper meal and a carrot is a nibble.
+        getLabel: () => {
+          if (!isHungry(horse)) return '';
+          if (inventory.get('horseFeed') > 0) {
+            return `Feed ${data.name} (🌾 ${inventory.get('horseFeed')})`;
+          }
+          if (inventory.get('carrots') > 0) {
+            return `Give ${data.name} a carrot (🥕 ${inventory.get('carrots')})`;
+          }
+          return `Feed ${data.name} (🌾 0)`;
+        },
         onPress: () => {
           // Feeding from the saddle is allowed - she can lean down.
           if (!isHungry(horse)) {
@@ -367,19 +425,32 @@ function registerHorseInteractions(horse) {
           }
 
           // One sack of horse feed per meal. spend() refuses - and changes
-          // nothing - when the sack cupboard is empty, so the horse stays
-          // hungry and she is told where to get more.
-          if (!inventory.spend('horseFeed', 1)) {
-            interactions.showMessage('No horse feed! Buy some at the store.');
+          // nothing - when the sack cupboard is empty, so we fall through to
+          // the carrots below rather than feeding anything.
+          if (inventory.spend('horseFeed', 1)) {
+            feedHorse(horse);
+            interactions.showMessage(
+              `Yum! ${data.name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
+            );
+            // A full hunger bar and one fewer sack are both worth remembering.
+            saveAndShow();
             return;
           }
 
-          feedHorse(horse);
+          // No oats, but a carrot out of her own garden will cheer him up for
+          // a while - about a third of the bar's worth.
+          if (inventory.spend('carrots', 1)) {
+            treatHorse(horse, CARROT_TREAT);
+            interactions.showMessage(
+              `Crunch! ${data.name} loves carrots. (🥕 ${inventory.get('carrots')} left)`
+            );
+            saveAndShow();
+            return;
+          }
+
           interactions.showMessage(
-            `Yum! ${data.name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
+            'No horse feed! Buy some at the store, or grow carrots.'
           );
-          // A full hunger bar and one fewer sack are both worth remembering.
-          saveAndShow();
         },
       },
     ],
@@ -477,7 +548,7 @@ function save(force = false) {
 
   lastSavedFrame = frameNumber;
   secondsSinceSave = 0;
-  saveGame(collectState({ natalia, horses, inventory, coop }));
+  saveGame(collectState({ natalia, horses, inventory, coop, garden }));
 }
 
 // The same save, with the "Saved" note: for the handful of moments the player
@@ -494,7 +565,7 @@ function saveAndShow() {
 const saved = loadGame();
 if (saved) {
   applyState(saved, {
-    natalia, horses, controls, bounds: world.bounds, inventory, coop,
+    natalia, horses, controls, bounds: world.bounds, inventory, coop, garden,
     // A horse in the save file that this ranch has never heard of is a foal
     // born in an earlier visit, so applyState asks breeding.js to build it and
     // then puts it back where it was standing, half grown up and all.
@@ -655,6 +726,30 @@ const STORE_ITEMS = [
       return `A fluffy new chick! It needs time to grow. (🐔 ${coop.count()})`;
     },
   },
+  // The two packets of seed for the garden back home. They are cheap on purpose:
+  // two coins buys one planting, and one planting comes back as three corn
+  // (worth 6 at the stall) or three carrots (worth 9). Growing things should
+  // always be worth doing.
+  {
+    key: 'cornSeeds',
+    label: 'Corn seeds',
+    icon: ITEM_ICONS.cornSeeds,
+    price: 2,
+    give: () => {
+      inventory.add('cornSeeds', 1);
+      return `Corn seeds! Plant them in the garden. (${ITEM_ICONS.cornSeeds} ${inventory.get('cornSeeds')})`;
+    },
+  },
+  {
+    key: 'carrotSeeds',
+    label: 'Carrot seeds',
+    icon: ITEM_ICONS.carrotSeeds,
+    price: 2,
+    give: () => {
+      inventory.add('carrotSeeds', 1);
+      return `Carrot seeds! Plant them in the garden. (${ITEM_ICONS.carrotSeeds} ${inventory.get('carrotSeeds')})`;
+    },
+  },
 ];
 
 const shopMenu = createShopMenu({
@@ -799,9 +894,15 @@ const MARKET_ITEMS = [
       return `The baker took all ${eggs} of them! (🪙 +${eggs * EGG_PRICE})`;
     },
   },
-  // What the neighbours grow. The icons come from inventory.js, so a bottle of
-  // milk is the same 🥛 on the HUD, in the trade panel and here.
+  // What the neighbours grow, plus the carrots out of her own garden. The icons
+  // come from inventory.js, so a bottle of milk is the same 🥛 on the HUD, in
+  // the trade panel and here.
+  //
+  // A carrot fetches 3, a corn 2. Carrots take sixty seconds to grow and corn
+  // takes ninety, so by the clock corn is the better earner - which is the
+  // small, quiet reason to plant some of each rather than six of one.
   goodsRow('corn', 'Corn', ITEM_ICONS.corn, 2),
+  goodsRow('carrots', 'Carrots', ITEM_ICONS.carrots, 3),
   goodsRow('apples', 'Apples', ITEM_ICONS.apples, 2),
   goodsRow('milk', 'Milk', ITEM_ICONS.milk, 6),
   goodsRow('wool', 'Wool', ITEM_ICONS.wool, 12),
@@ -916,6 +1017,148 @@ interactions.register({
 });
 
 // ===========================================================================
+// THE VEGETABLE GARDEN - PLANTING AND PICKING (Phase 7)
+// ===========================================================================
+//
+// One registration per plot, so each square of earth has its own prompt and its
+// own two keys. What she sees standing at a plot is one of three things:
+//
+//   bare earth     E: Plant corn (🌱 2)
+//                  F: Plant carrots (🌿 2)
+//   growing        E: Corn is growing...          (and a little green bar
+//                                                  floating over the plot)
+//   ready          E: Pick the corn
+//
+// ...which is the same shape as everything else on the ranch: E is "do the main
+// thing here", F is "the other thing", and a line that has nothing to say about
+// a key simply is not shown.
+//
+// The rules, all of them:
+//   * she has to be on her own two feet, like the barn, the store and the
+//     neighbours - you cannot lean out of the saddle to plant a seed;
+//   * a seed is only spent if it actually goes into the ground;
+//   * NOTHING can go wrong. There is no watering, no weeds and no withering, so
+//     the only thing a plot ever needs is time.
+// ===========================================================================
+
+// How close she has to stand. The plots are 2.2 units apart across the garden
+// and 2.4 apart front to back, so 1.5 leaves a comfortable circle round each one
+// without ever making it hard to tell which plot she means: the interaction
+// system always picks the NEAREST thing in range, and the nearest plot is
+// simply the one she is standing on.
+const PLOT_RADIUS = 1.5;
+
+// "corn" -> "Corn", for the start of a sentence.
+function capitalise(word) {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+// One plot's worth of planting: spend a seed, put it in the ground, say so.
+// It is written once and used by both keys, because the only thing that differs
+// between corn and carrots is which row of the CROPS table we are looking at.
+function plantInPlot(index, cropKey) {
+  const crop = CROPS[cropKey];
+  const icon = ITEM_ICONS[crop.seedKey];
+
+  if (!garden.isEmptyAt(index)) {
+    // She pressed a key on a plot that is already busy. The prompt said so, but
+    // say it out loud too rather than doing nothing at all.
+    interactions.showMessage(
+      garden.isReadyAt(index)
+        ? 'Pick this one first!'
+        : 'Something is already growing here.'
+    );
+    return;
+  }
+
+  // spend() refuses - and changes nothing - when the packet is empty, so the
+  // plot stays bare and she is told where to get more.
+  if (!inventory.spend(crop.seedKey, 1)) {
+    interactions.showMessage(`No ${crop.seedWords}! Buy some at the store.`);
+    return;
+  }
+
+  garden.plantAt(index, cropKey);
+  interactions.showMessage(
+    `You planted ${crop.name}! It will be ready soon. (${icon} ${inventory.get(crop.seedKey)} left)`
+  );
+  saveAndShow();
+}
+
+for (const plot of garden.plots) {
+  const index = plot.index;
+
+  interactions.register({
+    object: plot.group,
+    radius: PLOT_RADIUS,
+    actions: [
+      {
+        key: 'KeyE',
+        // E is "plant corn" on bare earth, "pick it" once something is ready,
+        // and a patient little note in between.
+        getLabel: () => {
+          if (riding.isRiding()) return 'Get off your horse first';
+
+          const growing = garden.cropAt(index);
+          if (!growing) {
+            return `Plant corn (${ITEM_ICONS.cornSeeds} ${inventory.get('cornSeeds')})`;
+          }
+          if (garden.isReadyAt(index)) return `Pick the ${CROPS[growing].name}`;
+          return `${capitalise(CROPS[growing].name)} is growing...`;
+        },
+        onPress: () => {
+          if (riding.isRiding()) return;   // the label already said why
+
+          const growing = garden.cropAt(index);
+
+          if (!growing) {
+            plantInPlot(index, 'corn');
+            return;
+          }
+
+          if (!garden.isReadyAt(index)) {
+            // Nothing to do but wait, and the bar over the plot is already
+            // showing how long. This is the friendly version of "not yet".
+            interactions.showMessage(
+              `The ${CROPS[growing].name} needs a little more time. Come back soon!`
+            );
+            return;
+          }
+
+          const picked = garden.harvestAt(index);
+          if (!picked) return;             // cannot happen, but never crash
+
+          const crop = CROPS[picked];
+          inventory.add(crop.harvestKey, crop.harvestCount);
+          interactions.showMessage(
+            `You picked ${crop.harvestCount} ${crop.name}! `
+            + `(${ITEM_ICONS[crop.harvestKey]} ${inventory.get(crop.harvestKey)})`,
+            2
+          );
+          hud.refresh();
+          saveAndShow();
+        },
+      },
+      {
+        key: 'KeyF',
+        // F is the second seed packet, and only that: once something is in the
+        // ground this line has nothing to say and disappears.
+        getLabel: () => {
+          if (riding.isRiding()) return '';
+          if (garden.cropAt(index)) return '';
+          return `Plant carrots (${ITEM_ICONS.carrotSeeds} ${inventory.get('carrotSeeds')})`;
+        },
+        onPress: () => {
+          if (riding.isRiding()) return;
+          if (garden.cropAt(index)) return;   // E deals with a busy plot
+          plantInPlot(index, 'carrot');
+        },
+      },
+    ],
+  });
+}
+
+// ===========================================================================
 // THE NEIGHBOURS - TRADING
 // ===========================================================================
 //
@@ -1026,6 +1269,11 @@ function update(dt) {
   // the safety net for anything else that changes the flock.)
   if (coop.count() !== chickensBefore) hud.refresh();
 
+  // 5c. The vegetable garden: whatever is in the ground grows a little, and
+  //     anything that is ripe sways gently to say "come and pick me". Growth is
+  //     play-time based, exactly like the chicks above and the foal below.
+  garden.update(dt, camera);
+
   // 5b. The neighbour farms. Each neighbour sways gently on the spot and lifts
   //     a hand to wave once Natalia is within six units, and the cows and sheep
   //     bob their heads in their paddocks.
@@ -1087,6 +1335,7 @@ window.ranch = {
   stella,
   horses,
   coop,
+  garden,
   inventory,
   hud,
   controls,

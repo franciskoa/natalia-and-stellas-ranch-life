@@ -84,14 +84,22 @@
       opacity: 0.62;
     }
 
-    /* The second line: what she has traded for with the neighbours, e.g.
-       "🍿 3 corn · 🥛 1 milk". js/inventory.js only writes the goods she
-       actually owns into it, and each one carries its own word, so this line
-       needs no legend of its own. */
+    /* The second line: what she has traded for with the neighbours and what she
+       has grown in her garden, e.g. "🍿 3 corn · 🥕 3 carrots · 🌱 1 corn seeds".
+       js/inventory.js only writes the goods she actually owns into it, and each
+       one carries its own word, so this line needs no legend of its own.
+
+       It is the one line in the HUD allowed to WRAP: with seven possible things
+       on it (five goods and two kinds of seed) it would otherwise run off the
+       side of a narrow screen, and the box it lives in has nothing underneath
+       it to push out of the way. */
     #hud-goods {
       margin-top: 3px;
+      max-width: 46vw;
       font-size: 12px;
       font-weight: 600;
+      line-height: 1.35;
+      white-space: normal;
       color: #ffe6a8;                /* a warm cream, so it reads as "extra" */
     }
 
@@ -772,12 +780,36 @@
       cursor: default;
     }
 
-    /* THE MARKET STALL is the one panel with a long list: a chicken, two egg
-       rows and the four things the neighbours grow come to seven. Its rows are
-       a notch shallower than the store's so the whole stall - including the
-       Close button - still fits on an ordinary laptop screen without anybody
-       having to scroll. (The panel can scroll, and does on a phone; it is just
-       not something an eight-year-old should have to discover.) */
+    /* THE FEED STORE sells five things since Phase 7 added the two packets of
+       seed, which is one row more than an ordinary laptop screen has room for.
+       Shaving three pixels off the top and bottom of each row is enough to put
+       the whole shop - including the Close button - comfortably back on screen. */
+    .shop-menu[data-shop="store"] .shop-item {
+      padding: 7px 12px;
+    }
+
+    /* THE MARKET STALL is the long one: a chicken, two egg rows, the four
+       things the neighbours grow AND the carrots out of her own garden come to
+       eight. Eight rows in a single column do not fit on a laptop screen at any
+       sensible size, so on a wide screen the stall is given a wider panel and
+       lays its goods out in TWO COLUMNS, four rows deep - which is what a real
+       market stall looks like anyway, and means nobody ever has to discover
+       that the panel scrolls.
+
+       Its rows are a notch shallower than the store's on top of that. On a
+       phone the two columns fold back into one (see the media query further
+       down) and the panel does the scrolling, which is the normal way round on
+       a small screen. */
+    .shop-menu[data-shop="market"] .barn-panel {
+      max-width: 760px;
+    }
+
+    .shop-menu[data-shop="market"] .shop-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: stretch;
+    }
+
     .shop-menu[data-shop="market"] .shop-item {
       padding: 6px 12px;
     }
@@ -808,7 +840,9 @@
     }
 
     /* On a phone the button drops under the words rather than squeezing the
-       name of the thing into nothing. */
+       name of the thing into nothing - and the market stall's two columns fold
+       back into one, because two of these rows side by side on a phone would be
+       far too narrow to read. */
     @media (max-width: 700px) {
       .shop-buy {
         min-width: 76px;
@@ -818,6 +852,10 @@
       .shop-item-icon {
         font-size: 24px;
         width: 32px;
+      }
+
+      .shop-menu[data-shop="market"] .shop-list {
+        grid-template-columns: 1fr;
       }
     }
 
@@ -959,7 +997,7 @@
     <b>Look:</b> drag mouse<br>
     <b>E:</b> use / ride&nbsp;&nbsp;&nbsp;<b>F:</b> feed<br>
     Follow the compass to the store<br>
-    Visit neighbours to trade
+    Visit neighbours &middot; grow crops
   </div>
 
   <!-- The compass badge at the top of the screen. js/road.js turns the arrow

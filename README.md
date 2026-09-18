@@ -30,5 +30,5 @@ No build tools, no npm install.
 | 4 | Multiple horses + customization + save | done — 3 horse kinds with own speed/hunger, barn menu (E at barn door) for saddle + blanket colours, autosave to localStorage, Start over button |
 | 5 | Chickens, coins, market stall, store | done — coins + inventory HUD, feed costs feed, chicken coop with eggs and growing chicks, market stall (sell chickens/eggs), ~50 s scenic road to the feed store, compass, all saved |
 | 6 | Neighbors and trading | done — four neighbour farms down signposted lanes (Garcia corn, Miller milk, Nguyen wool, Okafor apples), E on foot to trade eggs and goods, new goods on the HUD, market stall buys them, all saved |
-| 7 | Breeding + crops | not started |
+| 7 | Breeding + crops | done — barn menu "Foals": pick a mum and dad, a foal with a surprise coat (11 coats) is born by the barn, grows up in ~4 min, then rideable; vegetable garden with 6 plots for corn and carrots (E/F to plant, E to pick), seeds at the store, carrots sell at the stall and work as a horse treat, all saved |
 | 8 | Polish and deploy | not started |

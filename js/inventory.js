@@ -23,6 +23,18 @@
 //
 // They all start at 0: the only way to get any is to go and trade for them.
 //
+// Phase 7 adds the vegetable garden, which brings three more:
+//
+//   carrots      what she pulls out of a carrot plot, and a treat for a horse
+//   cornSeeds    what a corn plot is planted with
+//   carrotSeeds  what a carrot plot is planted with
+//
+// A brand new ranch starts with two of each seed, so the garden can be used the
+// very first time she walks up to it - she does not have to ride all the way to
+// the store before anything can be planted. Corn is NOT a new item: the
+// sweetcorn the Garcias trade and the corn she grows herself are the same thing
+// in her basket, and the market stall pays the same for either.
+//
 // What this module gives the rest of the game:
 //
 //   ITEM_KEYS                     everything that can be counted
@@ -34,26 +46,31 @@
 // Nothing here knows about Three.js, the save file or the coop. It just counts.
 
 // ---------------------------------------------------------------------------
-// The eight things we count. Anything not on this list is ignored, so a
+// The eleven things we count. Anything not on this list is ignored, so a
 // hand-edited save file cannot invent a "diamonds" pile.
 // ---------------------------------------------------------------------------
 export const ITEM_KEYS = [
   'coins', 'horseFeed', 'chickenFeed', 'eggs',
-  'corn', 'milk', 'wool', 'apples',
+  'corn', 'carrots', 'milk', 'wool', 'apples',
+  'cornSeeds', 'carrotSeeds',
 ];
 
 // What a brand new ranch starts with: enough feed to try everything out once,
-// and a few coins to spend at the store. The neighbours' goods start at 0 -
-// they have to be traded for.
+// a few coins to spend at the store, and two seeds of each kind so the garden
+// works from the very first minute. The neighbours' goods start at 0 - they
+// have to be traded for.
 export const STARTING_INVENTORY = {
   coins: 20,
   horseFeed: 3,
   chickenFeed: 5,
   eggs: 0,
   corn: 0,
+  carrots: 0,
   milk: 0,
   wool: 0,
   apples: 0,
+  cornSeeds: 2,
+  carrotSeeds: 2,
 };
 
 // A whole number of at least zero. A save file (or a typo) can hold anything,
@@ -171,6 +188,14 @@ export function createInventory(initial) {
 // into the store, the coop prompt and the messages), so the neighbours' corn
 // takes 🍿 instead - which an eight-year-old reads as "corn" just as quickly,
 // and nothing else in the game uses.
+//
+// THE TWO KINDS OF SEED are the only pair in here that are not obvious from the
+// picture alone: 🌱 and 🌿 are both simply "a green thing you plant". That is on
+// purpose, because every single place a seed is shown - the HUD, the store row,
+// the prompt at the plot - writes the WORD next to it as well ("🌱 2 corn
+// seeds", "F: Plant carrots (🌿 2)"). Nothing in the game ever asks a child to
+// tell one leaf from the other; the two pictures only have to be different from
+// each other, and from the nine icons above them.
 // ---------------------------------------------------------------------------
 export const ITEM_ICONS = {
   coins: '🪙',
@@ -178,9 +203,12 @@ export const ITEM_ICONS = {
   chickenFeed: '🌽',
   eggs: '🥚',
   corn: '🍿',
+  carrots: '🥕',
   milk: '🥛',
   wool: '🧶',
   apples: '🍎',
+  cornSeeds: '🌱',
+  carrotSeeds: '🌿',
 };
 
 // ---------------------------------------------------------------------------
@@ -196,11 +224,13 @@ export const ITEM_ICONS = {
 // The little legend under the first line (and the hover text) is there because
 // an eight-year-old should not have to guess what 🌾 means.
 //
-// THE SECOND LINE is the neighbours' goods, and it only appears once she OWNS
-// some: a brand new game shows nothing at all, and every good she has traded
-// for is written out with its own word beside it, so that line never needs a
-// legend of its own. Four more numbers on the top line from the very first
-// frame would have crowded it for no reason.
+// THE SECOND LINE is everything else she is carrying - what the neighbours grow,
+// what she has picked in her own garden, and the seeds she has left to plant.
+// Only the things she actually HAS any of are written into it, and each one
+// carries its own word, so the line never needs a legend and never lists a pile
+// of zeroes. (A brand new game shows the two packets of seeds straight away,
+// which is exactly the nudge a child needs to go and find the garden.) All of
+// this would have crowded the top line for no reason, hence the second one.
 //
 //   createHud(inventory, getChickenCount) -> { refresh }
 //
@@ -212,13 +242,20 @@ export const ITEM_ICONS = {
 // The things on the top line, in the order they appear on screen.
 const HUD_MAIN_KEYS = ['coins', 'horseFeed', 'chickenFeed', 'eggs'];
 
-// The things on the second line, with the word shown beside each number.
-const HUD_GOODS_KEYS = ['corn', 'milk', 'wool', 'apples'];
+// The things on the second line, with the word shown beside each number. The
+// vegetables she has in her basket come first, then the seeds she has left to
+// plant, so the line reads "what I have" and then "what I can grow".
+const HUD_GOODS_KEYS = [
+  'corn', 'carrots', 'milk', 'wool', 'apples', 'cornSeeds', 'carrotSeeds',
+];
 const HUD_GOODS_WORDS = {
   corn: 'corn',
+  carrots: 'carrots',
   milk: 'milk',
   wool: 'wool',
   apples: 'apples',
+  cornSeeds: 'corn seeds',
+  carrotSeeds: 'carrot seeds',
 };
 
 // The words under the top line, in the same order, with the chickens on the end.

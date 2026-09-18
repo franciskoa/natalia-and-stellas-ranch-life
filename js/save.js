@@ -35,6 +35,21 @@
 //     scale                 how big it will be when it is grown
 //     growSecondsLeft       how much growing up it still has to do (0 = grown)
 //   The three starting horses are saved exactly as they always were.
+// Version 6 (Phase 7, crops) adds the vegetable garden - one entry per plot,
+//   saying what is growing in it and how many seconds it has been growing:
+//     garden: { plots: [ { crop: 'corn', grown: 41.2 }, { crop: null, grown: 0 },
+//                        ... six of them ... ] }
+//   ...and three more things in her pocket: inventory.carrots, cornSeeds and
+//   carrotSeeds.
+//
+//   A version 1-5 save has no "garden" block at all, so it loads with six plots
+//   of bare earth - which is exactly what it had. It has no seeds in its pocket
+//   either, and because the pocket is filled in from STARTING_INVENTORY first
+//   (see applyState) that means an OLD save arrives with the same two packets of
+//   each seed a brand new game gets. That is deliberate: somebody who has been
+//   playing since Phase 5 should be able to walk straight out and plant
+//   something, rather than having to ride to the store before the new part of
+//   the game will do anything at all.
 //
 // Older saves still load. The parts they do not have simply get the new-game
 // defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, none of the
@@ -78,7 +93,7 @@ import { STARTING_INVENTORY } from './inventory.js';
 export const SAVE_KEY = 'ranchLifeSave';
 
 // The shape of the save file we WRITE.
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 // The oldest shape we can still READ. Anything between this and SAVE_VERSION
 // is loaded and quietly brought up to date (see applyState).
@@ -93,6 +108,12 @@ const DEFAULT_COOP = {
   eggTimer: 0,
   chicks: [],      // no chicks: the four starting chickens are all grown up
 };
+
+// What the garden looks like in a brand new game, and therefore what a version
+// 1-5 save (which had never heard of crops) gets filled in with: six plots of
+// bare earth. An empty list is enough - garden.setState clears every plot it is
+// not told about, so it does not need six nulls spelled out.
+const DEFAULT_GARDEN = { plots: [] };
 
 // Hunger runs 0..100, the same as in horse.js.
 const MAX_HUNGER = 100;
@@ -226,8 +247,10 @@ export function clearSave() {
 //       ...
 //     ],
 //     inventory: { coins, horseFeed, chickenFeed, eggs,
-//                  corn, milk, wool, apples },
-//     coop: { hunger, chickens, eggsOnGround, eggTimer, chicks: [12.5, ...] }
+//                  corn, carrots, milk, wool, apples,
+//                  cornSeeds, carrotSeeds },
+//     coop: { hunger, chickens, eggsOnGround, eggTimer, chicks: [12.5, ...] },
+//     garden: { plots: [ { crop: 'corn', grown: 41.2 }, ... ] }
 //   }
 //
 // Note there is no y: everybody stands on flat grass, so y is always 0.
@@ -239,7 +262,7 @@ export function clearSave() {
 // the controls subject on load, and that is a lot of fiddly machinery to buy
 // one second of convenience. Simple wins.
 // ---------------------------------------------------------------------------
-export function collectState({ natalia, horses, inventory, coop } = {}) {
+export function collectState({ natalia, horses, inventory, coop, garden } = {}) {
   const horseList = horses ?? [];
 
   // Where is Natalia? While she is riding she is a CHILD of the horse, so her
@@ -306,6 +329,11 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
     // is, and how much growing each chick has left to do. chickens.js builds
     // this for us with getState().
     coop: coop ? coop.getState() : { ...DEFAULT_COOP },
+
+    // The vegetable garden: one entry per plot saying what is growing in it and
+    // how long it has been growing. garden.js builds this for us with
+    // getState(), exactly the way the coop does.
+    garden: garden ? garden.getState() : { ...DEFAULT_GARDEN },
   };
 }
 
@@ -324,7 +352,10 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
 // ---------------------------------------------------------------------------
 export function applyState(
   state,
-  { natalia, horses, controls, resolveSpot, bounds, inventory, coop, addHorse } = {}
+  {
+    natalia, horses, controls, resolveSpot, bounds, inventory, coop, garden,
+    addHorse,
+  } = {}
 ) {
   if (!state) return false;
 
@@ -423,6 +454,16 @@ export function applyState(
     const saved = state.coop;
     coop.setState(
       saved && typeof saved === 'object' ? saved : { ...DEFAULT_COOP }
+    );
+  }
+
+  // --- the vegetable garden --------------------------------------------------
+  // And again: a version 1-5 save has no garden block, so it gets six plots of
+  // bare earth rather than whatever happened to be growing a moment ago.
+  if (garden) {
+    const saved = state.garden;
+    garden.setState(
+      saved && typeof saved === 'object' ? saved : { ...DEFAULT_GARDEN }
     );
   }
 
