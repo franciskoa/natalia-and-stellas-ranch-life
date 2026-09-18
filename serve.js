@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 8000;
+const PORT = Number(process.env.PORT) || 8000; // set PORT=8123 to run a second copy
 const ROOT = __dirname;
 
 const TYPES = {
