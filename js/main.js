@@ -17,6 +17,12 @@
 // sells now have to GROW UP before they can be sold or lay anything, so buying
 // a chick for 8 and selling it for 10 is not a way to print money.
 //
+// Phase 7 (this slice): foals. Two grown-up horses, two sacks of horse feed and
+// the big "Have a foal!" button in the barn menu, and a little foal is standing
+// outside the barn door - in a coat colour nobody chose. It cannot be ridden
+// until it has spent four minutes growing up, but it can be fed and it gets
+// hungry like every other horse. The ranch holds eight horses in all.
+//
 // Phase 6: four neighbour farms out along the road - the Garcias' corn, the
 // Millers' cows, the Nguyens' sheep and the Okafors' apples - and a trade panel
 // at each farm gate. Press E next to a neighbour and swap a basket of eggs for
@@ -44,6 +50,7 @@ import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
 import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
 import { createBarnMenu } from './menu.js';
+import { createBreeding } from './breeding.js';
 import { createShopMenu } from './shop.js';
 import { createTradeMenu } from './trade.js';
 import { createInventory, createHud, ITEM_ICONS } from './inventory.js';
@@ -170,15 +177,16 @@ const neighbors = buildNeighbors(scene);
 const RANCH_POSITION = { x: 0, z: 8 };
 
 // ---------------------------------------------------------------------------
-// The horses. One per entry in STARTING_HORSES above; the game loop and the
-// interaction code below just walk the list, so adding a fourth horse is a
-// matter of adding a fourth line to that array.
+// The horses. It starts empty and is filled in further down, once the controls
+// and the interaction system exist: every horse - the three the ranch starts
+// with, and every foal born later - goes into the world through the one helper
+// addHorseToWorld(), so a horse added in the middle of a game is set up exactly
+// like one that was there from the first frame.
+//
+// The array itself is handed to the barn menu and the save code, so a foal born
+// at half past four shows up in both without anybody being told.
 // ---------------------------------------------------------------------------
-const horses = STARTING_HORSES.map((spec) => {
-  const h = createHorse(spec);
-  scene.add(h);
-  return h;
-});
+const horses = [];
 
 // ---------------------------------------------------------------------------
 // The chicken coop: a hen house and a fenced pen beside the house.
@@ -217,15 +225,13 @@ scene.add(stella);
 // ---------------------------------------------------------------------------
 const controls = createControls(natalia, camera, renderer.domElement, world.bounds);
 
-// Every horse is a round thing nobody can walk through. The circle is read
-// from the horse's own position each frame, so once a horse has been ridden to
-// a new spot the no-go area is there too, not back where it started.
-// (A horse never bumps into itself while it is the one being ridden.)
-// A small horse gets a small circle, so you can stand closer to the pony.
+// Every horse is a round thing nobody can walk through (see addHorseToWorld
+// below). The circle is read from the horse's own position each frame, so once
+// a horse has been ridden to a new spot the no-go area is there too, not back
+// where it started. (A horse never bumps into itself while it is the one being
+// ridden.) A small horse gets a small circle, so you can stand closer to the
+// pony - and closer still to a foal, until it grows.
 const HORSE_BLOCK_RADIUS = 1.6;
-for (const h of horses) {
-  controls.addObstacle(h, HORSE_BLOCK_RADIUS * h.userData.scale);
-}
 
 // The chicken pen is a rectangle nobody may walk into - not Natalia, and not a
 // horse she is riding. She talks to the chickens over the gate.
@@ -282,6 +288,144 @@ const interactions = createInteractions(
 // and camera over to it.
 // ---------------------------------------------------------------------------
 const riding = createRiding({ natalia, stella, controls, interactions, scene });
+
+// ===========================================================================
+// PUTTING A HORSE IN THE WORLD
+//
+// One helper does the whole job, and both the three starting horses and every
+// foal born later go through it. That is the only way a horse that turns up in
+// the middle of a game can be sure of everything a horse needs:
+//
+//   1. it is in the scene, so it is drawn;
+//   2. it is in the "horses" array, so the game loop makes it hungry, the barn
+//      menu lists it and the save file remembers it;
+//   3. it is a round thing nobody can walk through;
+//   4. E and F work on it.
+//
+// Nothing else in this file loops over the horses at startup, so there is no
+// second place to remember.
+// ===========================================================================
+
+// Every horse Natalia can ride (E) and feed (F). The radius of 3 units is
+// comfortably outside the 1.6-unit circle controls.js keeps her out of, so
+// there is a wide band where she is close enough but not stuck on it.
+function registerHorseInteractions(horse) {
+  const data = horse.userData;
+
+  interactions.register({
+    object: horse,
+    radius: 3.0,
+    actions: [
+      {
+        key: 'KeyE',
+        // Sitting on this horse? Then E is how you get down again. A foal is
+        // far too little to carry anybody, and says so.
+        getLabel: () => {
+          if (riding.isRiding() && riding.ridingHorse() === horse) return 'Get off';
+          if (data.isFoal) return `${data.name} is too little to ride`;
+          return `Ride ${data.name}`;
+        },
+        onPress: () => {
+          if (riding.isRiding()) {
+            // Only the horse she is actually on can put her down.
+            if (riding.ridingHorse() === horse) {
+              riding.dismount();
+              interactions.showMessage('Natalia hops off.');
+              // Where she got off - and where the horse ended up - is worth
+              // keeping straight away.
+              saveAndShow();
+            }
+            return;
+          }
+
+          if (data.isFoal) {
+            interactions.showMessage(
+              `${data.name} is too little to ride. Give ${data.name} time to grow!`
+            );
+            return;
+          }
+
+          riding.mount(horse);
+          interactions.showMessage(`Giddy up, ${data.name}!`);
+          saveAndShow();
+        },
+      },
+      {
+        key: 'KeyF',
+        // An empty label means "nothing to say about F right now", so a full
+        // horse simply does not show the feeding line. The number in brackets
+        // is how many sacks of horse feed are left in her pocket. A foal eats
+        // exactly like a grown horse - being little is no excuse for being
+        // hungry.
+        getLabel: () =>
+          isHungry(horse) ? `Feed ${data.name} (🌾 ${inventory.get('horseFeed')})` : '',
+        onPress: () => {
+          // Feeding from the saddle is allowed - she can lean down.
+          if (!isHungry(horse)) {
+            interactions.showMessage(`${data.name} isn't hungry right now.`);
+            return;
+          }
+
+          // One sack of horse feed per meal. spend() refuses - and changes
+          // nothing - when the sack cupboard is empty, so the horse stays
+          // hungry and she is told where to get more.
+          if (!inventory.spend('horseFeed', 1)) {
+            interactions.showMessage('No horse feed! Buy some at the store.');
+            return;
+          }
+
+          feedHorse(horse);
+          interactions.showMessage(
+            `Yum! ${data.name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
+          );
+          // A full hunger bar and one fewer sack are both worth remembering.
+          saveAndShow();
+        },
+      },
+    ],
+  });
+}
+
+// A growing foal gets wider every frame, so the circle nobody may walk through
+// has to keep up. controls.addObstacle handed us the entry it stores; writing a
+// new radius into it is all it takes.
+function updateHorseCircle(horse) {
+  const entry = horse.userData.obstacle;
+  if (entry) entry.radius = HORSE_BLOCK_RADIUS * horse.userData.scale;
+}
+
+function addHorseToWorld(horse) {
+  scene.add(horse);
+  horses.push(horse);
+  horse.userData.obstacle = controls.addObstacle(
+    horse, HORSE_BLOCK_RADIUS * horse.userData.scale
+  );
+  registerHorseInteractions(horse);
+  return horse;
+}
+
+// The three horses the ranch starts with.
+for (const spec of STARTING_HORSES) addHorseToWorld(createHorse(spec));
+
+// ===========================================================================
+// FOALS (Phase 7)
+//
+// breeding.js owns the whole idea: which coats a foal can be born with, what it
+// costs, how long it takes to grow up and what it is called. All it asks of
+// this file is somewhere to put the new horse (addHorseToWorld, just above), a
+// way to find a free patch of grass, and somewhere to say the happy news.
+//
+// The barn menu further down is what the player actually presses.
+// ===========================================================================
+const breeding = createBreeding({
+  horses,
+  inventory,
+  addHorse: addHorseToWorld,
+  isSpotFree: (x, z, radius) => controls.isSpotFree(x, z, radius),
+  onResize: updateHorseCircle,
+  announce: (text) => interactions.showMessage(text, 3),
+  onChange: () => save(),
+});
 
 // ---------------------------------------------------------------------------
 // SAVING AND LOADING
@@ -351,6 +495,10 @@ const saved = loadGame();
 if (saved) {
   applyState(saved, {
     natalia, horses, controls, bounds: world.bounds, inventory, coop,
+    // A horse in the save file that this ranch has never heard of is a foal
+    // born in an earlier visit, so applyState asks breeding.js to build it and
+    // then puts it back where it was standing, half grown up and all.
+    addHorse: (entry) => breeding.fromSave(entry),
   });
 
   // The coop may have gained or lost chickens, and the pocket may have changed
@@ -379,72 +527,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') save(true);
 });
 
-// Every horse is something Natalia can ride (E) and feed (F). The radius of 3
-// units is comfortably outside the 1.6-unit circle controls.js keeps her out
-// of, so there is a wide band where she is close enough but not stuck on it.
-for (const h of horses) {
-  const name = h.userData.name;
-
-  interactions.register({
-    object: h,
-    radius: 3.0,
-    actions: [
-      {
-        key: 'KeyE',
-        // Sitting on this horse? Then E is how you get down again.
-        getLabel: () =>
-          riding.isRiding() && riding.ridingHorse() === h ? 'Get off' : `Ride ${name}`,
-        onPress: () => {
-          if (riding.isRiding()) {
-            // Only the horse she is actually on can put her down.
-            if (riding.ridingHorse() === h) {
-              riding.dismount();
-              interactions.showMessage('Natalia hops off.');
-              // Where she got off - and where the horse ended up - is worth
-              // keeping straight away.
-              saveAndShow();
-            }
-          } else {
-            riding.mount(h);
-            interactions.showMessage(`Giddy up, ${name}!`);
-            saveAndShow();
-          }
-        },
-      },
-      {
-        key: 'KeyF',
-        // An empty label means "nothing to say about F right now", so a full
-        // horse simply does not show the feeding line. The number in brackets
-        // is how many sacks of horse feed are left in her pocket.
-        getLabel: () =>
-          isHungry(h) ? `Feed ${name} (🌾 ${inventory.get('horseFeed')})` : '',
-        onPress: () => {
-          // Feeding from the saddle is allowed - she can lean down.
-          if (!isHungry(h)) {
-            interactions.showMessage(`${name} isn't hungry right now.`);
-            return;
-          }
-
-          // One sack of horse feed per meal. spend() refuses - and changes
-          // nothing - when the sack cupboard is empty, so the horse stays
-          // hungry and she is told where to get more.
-          if (!inventory.spend('horseFeed', 1)) {
-            interactions.showMessage('No horse feed! Buy some at the store.');
-            return;
-          }
-
-          feedHorse(h);
-          interactions.showMessage(
-            `Yum! ${name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
-          );
-          // A full hunger bar and one fewer sack are both worth remembering.
-          saveAndShow();
-        },
-      },
-    ],
-  });
-}
-
 // ---------------------------------------------------------------------------
 // The barn menu: the panel of big buttons for choosing a horse and painting
 // its saddle and blanket. menu.js builds it out of ordinary HTML and hangs it
@@ -454,22 +536,38 @@ for (const h of horses) {
 // browser the instant it is chosen - even if the tab is closed the moment
 // after.
 //
-// onReset runs when the player has tapped "Start over" AND confirmed it. We
-// throw the save file away and reload the page, which is the simplest possible
-// "new ranch": the game builds itself from STARTING_HORSES again, with no tack
-// and full hunger bars. savingStopped makes sure nothing writes the old ranch
-// back out while the page is on its way down.
+// The panel also holds the Foals section, where two grown-up horses and two
+// sacks of feed become a foal. It asks breeding.js what it may and may not do,
+// so the rules live in one place rather than in the buttons.
+//
+// onReset runs when the player has tapped "Start over" AND confirmed it - see
+// startOver just below.
 // ---------------------------------------------------------------------------
+
+// startOver - throw the save file away and build a brand new ranch.
+//
+// The new ranch comes from reloading the page: the game builds itself from
+// STARTING_HORSES again, with no tack, full hunger bars and - because every
+// foal ever born lived in the save file - three horses again.
+//
+// savingStopped makes sure nothing writes the old ranch back out while the page
+// is on its way down (the autosave, or the save that closing the page sets off).
+//
+// reload is only ever false in a test, which wants to check the save really was
+// thrown away without the page disappearing from under it.
+function startOver(reload = true) {
+  savingStopped = true;
+  clearSave();
+  if (reload) location.reload();
+}
+
 const barnMenu = createBarnMenu({
   horses,
   controls,
   interactions,
+  breeding,
   onChange: () => saveAndShow(),
-  onReset: () => {
-    savingStopped = true;
-    clearSave();
-    location.reload();
-  },
+  onReset: () => startOver(),
 });
 
 // ---------------------------------------------------------------------------
@@ -916,6 +1014,9 @@ function update(dt) {
     updateHorse(h, dt, camera);
     h.userData.setMoving(h === riddenHorse && controls.isMoving(), dt);
   }
+  // 4b. A foal, if one is growing up, gets a little bigger - and when its four
+  //     minutes are up it becomes an ordinary horse and the game says so.
+  breeding.update(dt);
   // 5. The chicken coop: the flock gets hungrier, the chickens potter about
   //    the pen, and now and then one leaves an egg in the grass.
   const chickensBefore = coop.count();
@@ -994,6 +1095,9 @@ window.ranch = {
   road,
   market,
   neighbors,
+  breeding,
+  addHorseToWorld,
+  startOver,
   barnMenu,
   shopMenu,
   marketMenu,

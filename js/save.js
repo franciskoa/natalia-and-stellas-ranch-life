@@ -24,6 +24,17 @@
 //   before it is a full chicken.
 // Version 4 (Phase 6, trading) adds the four things the neighbours farm to her
 //   pocket: inventory.corn, inventory.milk, inventory.wool and inventory.apples.
+// Version 5 (Phase 7, foals) makes the list of horses a VARIABLE length one.
+//   Until now it was always the same three horses and all we saved was how each
+//   of them had been dressed. Now a horse can be born on the ranch, so a saved
+//   horse the game does not recognise is built from scratch on the way in, and
+//   carries five extra fields to say how:
+//     bred: true            born here rather than one of the starting three
+//     coat: 'palomino'      the random coat it was born with
+//     speed / hungerSeconds its own stats, mixed from its mum's and its dad's
+//     scale                 how big it will be when it is grown
+//     growSecondsLeft       how much growing up it still has to do (0 = grown)
+//   The three starting horses are saved exactly as they always were.
 //
 // Older saves still load. The parts they do not have simply get the new-game
 // defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, none of the
@@ -67,7 +78,7 @@ import { STARTING_INVENTORY } from './inventory.js';
 export const SAVE_KEY = 'ranchLifeSave';
 
 // The shape of the save file we WRITE.
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 // The oldest shape we can still READ. Anything between this and SAVE_VERSION
 // is loaded and quietly brought up to date (see applyState).
@@ -95,6 +106,14 @@ const NATALIA_RADIUS = 0.35;
 function finiteOr(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+// A number rounded to one decimal place. A foal's speed and how far through
+// growing up it is are both saved this way: nobody needs nine decimal places.
+function round1(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 10) / 10;
 }
 
 // Keep a number inside a range, and turn anything that is not a number (a
@@ -250,7 +269,7 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
     },
     horses: horseList.map((horse) => {
       const data = horse.userData;
-      return {
+      const entry = {
         id: data.id,
         name: data.name,
         kind: data.kind,
@@ -261,6 +280,20 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
         z: horse.position.z,
         rotationY: horse.rotation.y,
       };
+
+      // A horse born on the ranch (Phase 7) has no entry in STARTING_HORSES to
+      // be rebuilt from, so it carries everything it needs to be built again:
+      // its coat, its own stats, and how much growing up it has left.
+      if (data.bred) {
+        entry.bred = true;
+        entry.coat = data.coat;
+        entry.speed = round1(data.speed);
+        entry.hungerSeconds = round1(data.hungerSeconds);
+        entry.scale = round1(data.adultScale);
+        entry.growSecondsLeft = round1(data.growSecondsLeft ?? 0);
+      }
+
+      return entry;
     }),
 
     // Her pocket: coins, both kinds of feed, eggs, and the four things she has
@@ -291,7 +324,7 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
 // ---------------------------------------------------------------------------
 export function applyState(
   state,
-  { natalia, horses, controls, resolveSpot, bounds, inventory, coop } = {}
+  { natalia, horses, controls, resolveSpot, bounds, inventory, coop, addHorse } = {}
 ) {
   if (!state) return false;
 
@@ -308,11 +341,18 @@ export function applyState(
 
     // Match by id ('h1', 'h2', ...), not by position in the list, so adding a
     // new starting horse later does not shuffle everybody's saddles around.
-    const horse = horseList.find((h) => h.userData.id === saved.id);
+    let horse = horseList.find((h) => h.userData.id === saved.id);
 
-    // A saved horse with an id we do not have is ignored for now. Phase 7
-    // (breeding) will need to CREATE a horse here instead, because a foal born
-    // in a previous session has no starting-horse entry to match against.
+    // No horse with that id? Then it is a foal born in an earlier visit ('f1',
+    // 'f2', ...), which has no starting-horse entry to match against - so we
+    // ask whoever loaded us to BUILD it (main.js hands breeding.js the job) and
+    // then carry on below, putting it back exactly where it was standing.
+    //
+    // A saved horse we cannot build - an id from an older game, or a herd that
+    // is already full - is quietly skipped, exactly as it always was.
+    if (!horse && saved.bred && typeof addHorse === 'function') {
+      horse = addHorse(saved) ?? null;
+    }
     if (!horse) continue;
 
     horse.position.x = clampNumber(saved.x, limits.minX, limits.maxX, horse.position.x);

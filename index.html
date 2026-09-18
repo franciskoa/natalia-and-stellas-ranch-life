@@ -311,9 +311,58 @@
       letter-spacing: 0.5px;
     }
 
-    /* One block per question: "Horse", "Saddle", "Blanket". */
+    /* The barn panel is the fullest one in the game - a button for every horse
+       on the ranch, two rows of colours AND the whole Foals section - so on a
+       wide screen it is given more room than the shop panels, and everything
+       inside it is packed a little tighter.
+
+       These three rules are scoped to #barn-menu on purpose: the store, the
+       market stall and the trade panel share .barn-panel and .barn-title, and
+       none of them should change. */
+    #barn-menu .barn-panel {
+      max-width: 700px;
+      padding: 14px 16px 16px;
+    }
+
+    #barn-menu .barn-title {
+      margin: 0 0 10px;
+      font-size: 24px;
+    }
+
+    /* One block per question: "Horse", "Saddle", "Blanket", "Foals". */
     .barn-row {
-      margin-bottom: 18px;
+      margin-bottom: 12px;
+    }
+
+    /* A row with its word BESIDE its buttons rather than above them: the
+       Saddle and Blanket colours, and the Mum and Dad rows in the Foals
+       section. It saves a line of height each time, which is what keeps the
+       whole panel readable on a laptop screen without scrolling. */
+    .barn-row-inline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .barn-row-inline .barn-row-label,
+    .barn-row-inline .barn-foal-sub {
+      flex: 0 0 58px;
+      margin-bottom: 0;
+    }
+
+    .barn-row-inline .barn-choices {
+      flex: 1 1 auto;
+      min-width: 0;
+      justify-content: flex-start;       /* the circles start beside their word */
+    }
+
+    .barn-parent-row {
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .barn-parent-row .barn-foal-sub {
+      padding-top: 12px;
     }
 
     .barn-row-label {
@@ -329,14 +378,17 @@
     .barn-choices {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       justify-content: center;
     }
 
     /* A horse button: its name, with its kind in smaller letters underneath. */
     .barn-horse {
       flex: 1 1 140px;
-      min-height: 56px;
+      max-width: 230px;                  /* a lone button on the last line of
+                                            the row never stretches right
+                                            across the panel */
+      min-height: 50px;
       padding: 8px 10px;
       display: flex;
       flex-direction: column;
@@ -368,15 +420,15 @@
 
     /* "Speed ★★★ · Stays full ★★" under the horse buttons. */
     .barn-stats {
-      margin-top: 10px;
+      margin-top: 6px;
       font-size: 14px;
       color: #dbe4ee;
     }
 
     /* A round colour button. The colour itself is set by menu.js. */
     .barn-swatch {
-      width: 52px;
-      height: 52px;
+      width: 46px;
+      height: 46px;
       padding: 0;
       font: inherit;
       font-size: 12px;
@@ -399,6 +451,138 @@
       box-shadow: 0 0 0 4px #ffffff;
     }
 
+    /* A foal is too little to wear a saddle, so while one is chosen every
+       colour fades back and stops taking taps. */
+    .barn-swatch:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+
+    /* "Clover is too little for a saddle" - empty, and so invisible, whenever
+       the chosen horse is a grown-up one. */
+    .barn-tack-why {
+      margin: -8px 0 12px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #ff9e80;
+    }
+
+    /* -----------------------------------------------------------------
+       THE FOALS SECTION (Phase 7)
+       Pick a mum, pick a dad, press the big green button. It lives at the
+       bottom of the barn panel, under a dividing line, because it is the
+       one thing in here that makes something new rather than changing
+       something that is already on the ranch.
+       ----------------------------------------------------------------- */
+    .barn-foal {
+      margin-top: 0;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    /* "Pick two horses. The foal's colour is a surprise!" */
+    .barn-foal-hint {
+      margin: -2px 0 8px;
+      text-align: left;
+      font-size: 13px;
+      color: #dbe4ee;
+    }
+
+    /* The little "Mum" and "Dad" words over each row of horses. */
+    .barn-foal-sub {
+      margin: 0 0 6px;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      opacity: 0.85;
+    }
+
+    /* A parent button: the same button as a horse button, a size down, so two
+       rows of them still leave room for the big green button underneath. */
+    .barn-parent {
+      flex: 1 1 96px;
+      max-width: 170px;
+      min-height: 42px;
+      padding: 4px 8px;
+      font: inherit;
+      color: #ffffff;
+      background: #39414f;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+
+    .barn-parent .barn-horse-name {
+      font-size: 15px;
+    }
+
+    .barn-parent .barn-horse-kind {
+      font-size: 11px;
+    }
+
+    /* The horse picked as this row's parent: green, like the grass, exactly
+       the way the chosen horse is marked in the row above. */
+    .barn-parent.selected {
+      background: #6a9c33;
+      border-color: #ffffff;
+    }
+
+    /* A long herd wraps onto more lines and then scrolls, so eight horses can
+       never push the Close button off the bottom of the screen. */
+    .barn-choices-scroll {
+      max-height: 148px;
+      overflow-y: auto;
+    }
+
+    .barn-foal .barn-choices-scroll {
+      max-height: 104px;
+      margin-bottom: 10px;
+    }
+
+    /* The big green button. It is the same grass green as the shop's Buy
+       buttons, because it does the same kind of thing: yes, go on. */
+    .barn-foal-go {
+      width: 100%;
+      min-height: 52px;
+      padding: 10px 18px;
+      font: inherit;
+      font-size: 19px;
+      font-weight: 700;
+      color: #23282f;
+      background: #8bc34a;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    .barn-foal-go:disabled {
+      color: #99a2ae;
+      background: #5b6472;
+      cursor: default;
+    }
+
+    /* Why the button is grey: "Pick a mum and a dad", "The ranch is full!". */
+    .barn-foal-why {
+      min-height: 18px;
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #ff9e80;
+    }
+
+    /* The happy news: "A palomino foal was born! Her name is Clover." */
+    .barn-foal-note {
+      min-height: 22px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #b9f6ca;
+    }
+
+    .barn-foal-note-bad {
+      color: #ff9e80;
+    }
+
     .barn-close {
       margin-top: 4px;
       min-height: 48px;
@@ -418,7 +602,7 @@
        work away, so nothing about it should invite a tap. */
     .barn-reset {
       display: block;
-      margin: 16px auto 0;
+      margin: 10px auto 0;
       padding: 6px 14px;
       font: inherit;
       font-size: 13px;
@@ -721,12 +905,24 @@
       }
 
       .barn-swatch {
-        width: 46px;
-        height: 46px;
+        width: 44px;
+        height: 44px;
       }
 
-      .barn-horse {
-        flex: 1 1 100%;                  /* one horse per line, nice and wide */
+      /* Two horses to a line, everywhere. One per line is lovely with three
+         horses and a very long list with eight, and the parent rows below
+         match it. */
+      .barn-horse,
+      .barn-parent {
+        flex: 1 1 44%;
+      }
+
+      /* On a phone the PANEL does all the scrolling. A little scrolling box
+         inside a scrolling panel is a horrible thing to hand an eight-year-old,
+         so the rows here are as long as they need to be. */
+      .barn-choices-scroll,
+      .barn-foal .barn-choices-scroll {
+        max-height: none;
       }
     }
   </style>

@@ -11,6 +11,7 @@
 //     horses,                  // the array of horse groups from horse.js
 //     controls,                // so the keyboard can be switched off
 //     interactions,            // so E and F stop working while we are in here
+//     breeding,                // breeding.js, for the Foals section (optional)
 //     onChange: () => save(),  // runs after every colour change (optional)
 //     onReset: () => start(),  // runs when "Start over" is confirmed (optional)
 //   });
@@ -31,6 +32,17 @@
 // drawing behind the panel, so you can see it happen through the dark sheet),
 // and then calls onChange() - which is where Phase 4's saving code hooks in.
 //
+// PHASE 7 adds the FOALS section at the bottom of the panel: pick a mum, pick
+// a dad - two different grown-up horses - and press "Have a foal!". It costs
+// two sacks of horse feed, and the foal is born outside the barn door in a coat
+// colour NOBODY CHOOSES. All the rules (how many horses the ranch holds, how
+// much a foal costs, whether one is still growing up) live in breeding.js; this
+// file only asks it "may I?" and shows the answer on the button.
+//
+// Because a foal can be born while the panel is open, the rows of horse buttons
+// are built fresh every time the panel opens and again after every birth (see
+// rebuild below) rather than once at the start.
+//
 // At the bottom of the panel there is also a small grey "Start over" button.
 // It does not wipe anything by itself: it asks first, right there inside the
 // panel, and only calls onReset() if the player taps "Yes, start over".
@@ -38,6 +50,7 @@
 // away and reload the page), so this file never has to know about saving.
 
 import { HORSE_KINDS, TACK_COLORS, setSaddle, setBlanket } from './horse.js';
+import { BREED_COST } from './breeding.js';
 
 // The CSS class index.html uses to show the panel. No class = hidden.
 const VISIBLE_CLASS = 'visible';
@@ -70,20 +83,27 @@ function starText(count) {
   return '★'.repeat(count);
 }
 
-// The breed table entry for a horse, or a safe empty one if the kind is
-// unknown (an old save file, say), so the menu never crashes.
-function kindOf(horse) {
-  const key = horse.userData.kind;
-  return HORSE_KINDS[key] ?? { label: 'Horse', speed: 10, hungerSeconds: 100 };
+// What KIND of horse this is, in a word: 'Chestnut', 'Pony' - or, for a horse
+// born on the ranch, the coat it was born with ('Palomino'). horse.js works it
+// out when the horse is built and writes it down as userData.label, so a coat
+// nobody has ever heard of still reads as something.
+function labelOf(horse) {
+  const data = horse.userData;
+  if (data.label) return data.label;
+  return HORSE_KINDS[data.kind] ? HORSE_KINDS[data.kind].label : 'Horse';
 }
 
 // "Speed ★★★ · Stays full ★★" for one horse.
+//
+// Both numbers come from the horse ITSELF rather than from the breed table,
+// because a foal's stats are a mix of its mum's and its dad's and belong to no
+// breed at all.
 //   speed          8 units a second earns one star, 13 earns three
 //   hungerSeconds  60 seconds to empty earns one star, 150 earns three
 function statsTextFor(horse) {
-  const breed = kindOf(horse);
-  const speed = countStars(breed.speed, 8, 13);
-  const full = countStars(breed.hungerSeconds, 60, 150);
+  const data = horse.userData;
+  const speed = countStars(data.speed ?? 10, 8, 13);
+  const full = countStars(data.hungerSeconds ?? 100, 60, 150);
   return 'Speed ' + starText(speed) + ' · Stays full ' + starText(full);
 }
 
@@ -99,7 +119,9 @@ function div(className, text) {
 // createBarnMenu - build the panel once, and hand back the four things the
 // rest of the game needs.
 // ---------------------------------------------------------------------------
-export function createBarnMenu({ horses, controls, interactions, onChange, onReset } = {}) {
+export function createBarnMenu({
+  horses, controls, interactions, breeding, onChange, onReset,
+} = {}) {
   const horseList = horses ?? [];
 
   // Which horse the colour buttons are dressing right now.
@@ -123,40 +145,64 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
   panel.appendChild(title);
 
   // --- row 1: which horse ---------------------------------------------------
+  // The buttons themselves are built by buildHorseButtons below, because the
+  // herd can grow while the game is running: a foal born this afternoon has to
+  // turn up in this row without the page being reloaded.
   const horseRow = div('barn-row');
   horseRow.appendChild(div('barn-row-label', 'Horse'));
-  const horseChoices = div('barn-choices');
+  const horseChoices = div('barn-choices barn-choices-scroll');
+  // A handle for the save code and for tests: which row of buttons is this?
+  horseChoices.dataset.choices = 'horses';
   horseRow.appendChild(horseChoices);
 
-  // One button per horse: its name, with its breed in smaller letters under it.
-  // We keep the buttons in a list so refresh() can tick the right one.
-  const horseButtons = [];
-
-  for (const horse of horseList) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'barn-horse';
-    // A handle for the save code and for tests: which horse is this button?
-    button.dataset.horseId = horse.userData.id ?? '';
-
-    const name = div('barn-horse-name', horse.userData.name ?? 'Horse');
-    const kind = div('barn-horse-kind', kindOf(horse).label);
-    button.appendChild(name);
-    button.appendChild(kind);
-
-    button.addEventListener('click', () => {
-      selectedHorse = horse;
-      refresh();
-    });
-
-    horseChoices.appendChild(button);
-    horseButtons.push({ button, horse });
-  }
+  // Which horse each button is for: { button, horse }. refresh() walks this
+  // list to tick the chosen one.
+  let horseButtons = [];
 
   // The one-line hint under the horse buttons: "Speed ★★★ · Stays full ★★".
   const statsLine = div('barn-stats', '');
   horseRow.appendChild(statsLine);
   panel.appendChild(horseRow);
+
+  // -------------------------------------------------------------------------
+  // buildHorseButtons - fill a row with one big button per horse.
+  //
+  //   container  the <div class="barn-choices"> to fill
+  //   list       which horses to show
+  //   className  'barn-horse' for the main row, 'barn-parent' for the smaller
+  //              mum and dad rows in the Foals section
+  //   onPick     what to do when one is tapped
+  //
+  // Each button says the horse's name, with what kind it is in smaller letters
+  // underneath - and " · foal" after that while it is still growing up, so the
+  // reason its saddle buttons are greyed out is written right there.
+  // -------------------------------------------------------------------------
+  function buildHorseButtons(container, list, className, onPick) {
+    container.textContent = '';               // empty it out first
+    const made = [];
+
+    for (const horse of list) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = className;
+      // A handle for the save code and for tests: which horse is this button?
+      button.dataset.horseId = horse.userData.id ?? '';
+
+      const kindWords = horse.userData.isFoal
+        ? labelOf(horse) + ' · foal'
+        : labelOf(horse);
+
+      button.appendChild(div('barn-horse-name', horse.userData.name ?? 'Horse'));
+      button.appendChild(div('barn-horse-kind', kindWords));
+
+      button.addEventListener('click', () => onPick(horse));
+
+      container.appendChild(button);
+      made.push({ button, horse });
+    }
+
+    return made;
+  }
 
   // --- rows 2 and 3: the saddle and blanket colours -------------------------
   // Both rows are the same thing with a different "apply" function, so one
@@ -167,7 +213,10 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
   //              work out which swatch is the chosen one
   //   apply      setSaddle or setBlanket from horse.js
   function buildColorRow(labelText, rowName, apply) {
-    const row = div('barn-row');
+    // "barn-row-inline" puts the word "Saddle" beside its circles rather than
+    // above them, which keeps the panel short enough to read without scrolling
+    // on an ordinary laptop screen.
+    const row = div('barn-row barn-row-inline');
     row.appendChild(div('barn-row-label', labelText));
 
     const choices = div('barn-choices');
@@ -218,6 +267,85 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
 
   const saddleRow = buildColorRow('Saddle', 'saddle', setSaddle);
   const blanketRow = buildColorRow('Blanket', 'blanket', setBlanket);
+
+  // The line that says why the colours are greyed out: a foal is too little to
+  // wear a saddle. It is empty (and so invisible) the rest of the time.
+  const tackWhy = div('barn-tack-why', '');
+  panel.appendChild(tackWhy);
+
+  // --- the Foals section ----------------------------------------------------
+  // Pick a mum, pick a dad, press the big green button. Everything about what
+  // is allowed comes from breeding.js; if nobody passed a breeding object in,
+  // the whole section simply is not built.
+  const foalRow = div('barn-row barn-foal');
+  let mumButtons = [];
+  let dadButtons = [];
+  let mumChoices = null;
+  let dadChoices = null;
+  let foalButton = null;
+  let foalWhy = null;
+  let foalNote = null;
+
+  // The two horses picked as the parents. Nothing is picked to begin with, so
+  // the button starts out greyed with "Pick a mum and a dad" under it.
+  let mum = null;
+  let dad = null;
+
+  // "Mum" (or "Dad") with its row of horse buttons beside it.
+  function parentRow(word, choices) {
+    const row = div('barn-row-inline barn-parent-row');
+    row.appendChild(div('barn-foal-sub', word));
+    row.appendChild(choices);
+    return row;
+  }
+
+  if (breeding) {
+    foalRow.appendChild(div('barn-row-label', 'Foals'));
+    foalRow.appendChild(
+      div('barn-foal-hint', 'Pick two horses. The foal’s colour is a surprise!')
+    );
+
+    // "Mum" and "Dad", each with its own row of horses beside it - the same
+    // shape as the Saddle and Blanket rows above.
+    mumChoices = div('barn-choices barn-choices-scroll');
+    mumChoices.dataset.choices = 'mum';
+    foalRow.appendChild(parentRow('Mum', mumChoices));
+
+    dadChoices = div('barn-choices barn-choices-scroll');
+    dadChoices.dataset.choices = 'dad';
+    foalRow.appendChild(parentRow('Dad', dadChoices));
+
+    foalButton = document.createElement('button');
+    foalButton.type = 'button';
+    foalButton.className = 'barn-foal-go';
+    foalButton.textContent = 'Have a foal! (🌾 ' + BREED_COST + ')';
+    foalButton.addEventListener('click', () => {
+      const result = breeding.breed(mum, dad);
+      if (result.ok) {
+        // "A palomino foal was born! Her name is Clover."
+        foalNote.textContent = result.message;
+        foalNote.classList.remove('barn-foal-note-bad');
+        // The herd just grew, so every row of horse buttons is out of date.
+        rebuild();
+      } else {
+        // The button should already have been greyed out, but if something
+        // changed while the panel was open, say why in the same place.
+        foalNote.textContent = result.message;
+        foalNote.classList.add('barn-foal-note-bad');
+        refresh();
+      }
+    });
+    foalRow.appendChild(foalButton);
+
+    // Under the button: why it cannot be pressed, and then the happy news when
+    // it can and has been.
+    foalWhy = div('barn-foal-why', '');
+    foalNote = div('barn-foal-note', '');
+    foalRow.appendChild(foalWhy);
+    foalRow.appendChild(foalNote);
+
+    panel.appendChild(foalRow);
+  }
 
   // --- the Close button -----------------------------------------------------
   const closeButton = document.createElement('button');
@@ -277,6 +405,46 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
 
   document.body.appendChild(root);
 
+  // --- rebuilding the rows when the herd changes ----------------------------
+  // Called when the panel opens and again after a foal is born. It throws the
+  // old buttons away and makes one per horse there is now, which is why a new
+  // foal turns up in all three rows without anybody having to reload anything.
+  function rebuild() {
+    // A horse that is no longer about (nothing removes one today, but let us
+    // not depend on that) must not stay picked.
+    if (!horseList.includes(selectedHorse)) selectedHorse = horseList[0] ?? null;
+
+    horseButtons = buildHorseButtons(horseChoices, horseList, 'barn-horse', (horse) => {
+      selectedHorse = horse;
+      refresh();
+    });
+
+    if (breeding) {
+      // Only grown-up horses can be a mum or a dad, so a foal is simply not
+      // offered here - there is nothing to grey out and nothing to explain.
+      const grownUps = breeding.parents();
+
+      if (!grownUps.includes(mum)) mum = null;
+      if (!grownUps.includes(dad)) dad = null;
+
+      mumButtons = buildHorseButtons(mumChoices, grownUps, 'barn-parent', (horse) => {
+        mum = horse;
+        // Mum and dad always have to be two different horses, so picking this
+        // one as the mum takes it out of the dad slot rather than complaining.
+        if (dad === horse) dad = null;
+        refresh();
+      });
+
+      dadButtons = buildHorseButtons(dadChoices, grownUps, 'barn-parent', (horse) => {
+        dad = horse;
+        if (mum === horse) mum = null;
+        refresh();
+      });
+    }
+
+    refresh();
+  }
+
   // --- keeping the buttons in step with the horses --------------------------
   // Tick the chosen horse, tick the colours it is wearing, and write the stars.
   function refresh() {
@@ -289,6 +457,15 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
 
     statsLine.textContent = selectedHorse ? statsTextFor(selectedHorse) : '';
 
+    // A foal is too little to wear anything, so its colour buttons are greyed
+    // out until it has grown up - and the line under them says why.
+    const dressable = !!selectedHorse && !selectedHorse.userData.isFoal;
+    tackWhy.textContent = dressable
+      ? ''
+      : selectedHorse
+        ? selectedHorse.userData.name + ' is too little for a saddle'
+        : '';
+
     for (const row of [saddleRow, blanketRow]) {
       // What is this horse wearing on this row? 'none' if we have no horse.
       const worn = selectedHorse ? selectedHorse.userData[row.rowName] : 'none';
@@ -296,8 +473,35 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
         const isChosen = swatch.colorKey === worn;
         swatch.button.classList.toggle(SELECTED_CLASS, isChosen);
         swatch.button.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
+        swatch.button.disabled = !dressable;
       }
     }
+
+    refreshFoals();
+  }
+
+  // The Foals section: tick the two parents, and grey the big button out with
+  // a reason whenever breeding.js says no.
+  function refreshFoals() {
+    if (!breeding) return;
+
+    for (const entry of mumButtons) {
+      const isChosen = entry.horse === mum;
+      entry.button.classList.toggle(SELECTED_CLASS, isChosen);
+      entry.button.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
+    }
+
+    for (const entry of dadButtons) {
+      const isChosen = entry.horse === dad;
+      entry.button.classList.toggle(SELECTED_CLASS, isChosen);
+      entry.button.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
+    }
+
+    // One question, asked in one place: "may these two have a foal?" An empty
+    // answer means yes; anything else is a short line a child can read.
+    const why = breeding.whyNot(mum, dad);
+    foalButton.disabled = why !== '';
+    foalWhy.textContent = why;
   }
 
   // --- opening and closing --------------------------------------------------
@@ -305,9 +509,15 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
     if (open) return;
     open = true;
 
-    // Put the buttons in step with the horses before anybody sees them: a
-    // horse may have been dressed by the save file since we last looked.
-    refresh();
+    // Build the rows from the herd as it is RIGHT NOW - a foal may have been
+    // born, or grown up, since the panel was last open - and put every button
+    // in step with the horse it belongs to.
+    rebuild();
+    // Yesterday's happy news is not today's.
+    if (foalNote) {
+      foalNote.textContent = '';
+      foalNote.classList.remove('barn-foal-note-bad');
+    }
     // Never open on top of a half-answered "are you sure?".
     showConfirm(false);
     root.classList.add(VISIBLE_CLASS);
@@ -353,17 +563,38 @@ export function createBarnMenu({ horses, controls, interactions, onChange, onRes
 
   window.addEventListener('keydown', onKeyDown);
 
-  // Once a frame from the game loop. There is nothing for the panel to animate
-  // yet - it is plain HTML and the browser fades it for us - so this does
-  // nothing. It exists so the game loop never has to change if that alters.
+  // Once a frame from the game loop.
+  //
+  // The game keeps running behind the panel, so a foal can finish growing up
+  // while the barn menu is open - and the moment it does, it should stop being
+  // marked "· foal" and start being allowed to be a parent. Rather than redraw
+  // sixty times a second for something that changes twice an hour, we glance at
+  // the herd twice a second and only rebuild when it has actually changed.
+  let sinceCheck = 0;
+  let lastHerdSize = 0;
+  let lastGrowingId = '';
+
   function update(dt) {
-    // Nothing to do.
+    if (!open || !breeding) return;
+
+    sinceCheck += dt;
+    if (sinceCheck < 0.4) return;
+    sinceCheck = 0;
+
+    const foal = breeding.growingFoal();
+    const growingId = foal ? foal.userData.id ?? '' : '';
+
+    if (horseList.length !== lastHerdSize || growingId !== lastGrowingId) {
+      lastHerdSize = horseList.length;
+      lastGrowingId = growingId;
+      rebuild();
+    }
   }
 
-  // Start hidden, with every button already showing the right state and the
+  // Start hidden, with a button for every horse the ranch has right now and the
   // "are you sure?" question tucked away.
-  refresh();
+  rebuild();
   showConfirm(false);
 
-  return { open: openMenu, close, isOpen, update };
+  return { open: openMenu, close, isOpen, update, refresh: rebuild };
 }

@@ -15,6 +15,10 @@
 //   isHungry(horse)                 - true while the bar is not full
 //   setSaddle(horse, colorKey)      - 'none' to take it off, or a TACK_COLORS key
 //   setBlanket(horse, colorKey)     - same idea, for the blanket underneath
+//   applyGrowth(horse, grown)       - Phase 7: how grown up this horse is, from
+//                                     0 (a newborn foal) to 1 (a full horse)
+//   FOAL_SCALE                      - how big a newborn foal is (0.55 = just
+//                                     over half the size of its parents)
 //
 // Each horse also carries its own little walk animation, the same idea as the
 // girls' setWalking in characters.js:
@@ -134,6 +138,18 @@ const BODY_BOB = 0.05;   // how far the body lifts on each stride
 // this point and turns around it, the way a real leg turns at the hip.
 const HIP_HEIGHT = 1.25;
 
+// ---------------------------------------------------------------------------
+// FOALS (Phase 7). A newborn foal is the same horse, built the same way, only
+// smaller - and, like a real foal, all legs: its legs are nearly a fifth longer
+// than a grown horse's next to its little body, which is exactly what makes a
+// foal look like a foal rather than like a toy horse.
+//
+// Both numbers slide back to 1 as it grows up, so a grown-up foal is an
+// ordinary horse with no special case anywhere else in the game.
+// ---------------------------------------------------------------------------
+export const FOAL_SCALE = 0.55;      // how big it is the day it is born
+const FOAL_LEG_STRETCH = 1.18;       // how leggy a newborn is
+
 // The top of the barrel at scale 1: the barrel is centred at y = 1.6 and is
 // 0.85 tall, so its back is at 2.025. Everything to do with sitting on the
 // horse or dressing it is measured from here.
@@ -185,6 +201,12 @@ legGeo.translate(0, -0.5, 0);
 const hoofGeo = new THREE.BoxGeometry(0.28, 0.26, 0.3);
 const earGeo = new THREE.BoxGeometry(0.12, 0.24, 0.12);
 
+// Phase 7: the two markings a coat can have. A spotted horse wears little dark
+// blobs; a pinto wears bigger patches. Both are just flat boxes sitting a hair
+// proud of the barrel, which costs the graphics card almost nothing.
+const spotGeo = new THREE.BoxGeometry(0.34, 0.3, 0.34);
+const patchGeo = new THREE.BoxGeometry(0.5, 0.46, 0.66);
+
 // Tiny helper: a box mesh at a position. Keeps the body code below short.
 function box(w, h, d, x, y, z, material) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -216,6 +238,37 @@ function buildLeg(x, z, coat, dark) {
   leg.add(hoof);
 
   return leg;
+}
+
+// ---------------------------------------------------------------------------
+// buildMarkings - Phase 7: the spots on a spotted horse, or the big white
+// patches on a pinto. They are added to the BODY group, so they ride along with
+// the barrel while it trots and shrink with the horse.
+//
+//   style  'spots'   half a dozen little blobs on the flanks and the rump
+//          'patches' three bigger ones, the way a pinto is coloured
+//   color  the colour to paint them (shared, like every other material here)
+//
+// The positions are written down rather than rolled, so a spotted foal has the
+// same spots in the same places every time the game is opened.
+// ---------------------------------------------------------------------------
+const MARKING_SPOTS = [
+  [0.43, 1.78, -0.55], [0.43, 1.52, 0.35], [-0.43, 1.64, -0.15],
+  [-0.43, 1.86, 0.5], [0.18, 1.98, -0.75], [-0.2, 1.98, 0.1],
+];
+
+const MARKING_PATCHES = [
+  [0.36, 1.62, -0.5], [-0.36, 1.74, 0.35], [0, 1.95, -0.62],
+];
+
+function buildMarkings(body, style, color) {
+  const material = mat(color);
+  const isPatches = style === 'patches';
+  const geometry = isPatches ? patchGeo : spotGeo;
+  const places = isPatches ? MARKING_PATCHES : MARKING_SPOTS;
+  for (const [x, y, z] of places) {
+    body.add(shaped(geometry, x, y, z, material));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +329,20 @@ function refreshBar(horse) {
 //                                 // Phase 7 uses this for foals, whose coat
 //                                 // colour is random.
 //   })
+//
+// PHASE 7 adds a handful of optional extras, all of which a bred horse uses and
+// none of which a starting horse needs. Left out, every one of them falls back
+// to what the kind's own row in HORSE_KINDS says, so nothing changes:
+//
+//     maneColor: 0x3e2723,        // mane, tail and hooves
+//     label: 'Palomino',          // the pretty name the barn menu shows
+//     speed: 10.4,                // units a second (mixed from its parents)
+//     hungerSeconds: 105,         // how long its bar takes to empty
+//     scale: 1,                   // how big a GROWN-UP one of these is
+//     markings: { style: 'spots', color: 0x4e3b2f },   // see buildMarkings
+//     grown: 1,                   // 0 = a newborn foal, 1 = all grown up
+//     bred: true,                 // born here rather than a starting horse
+//     coat: 'palomino',           // which coat it was born with (for the save)
 // ---------------------------------------------------------------------------
 export function createHorse({
   id = null,
@@ -284,12 +351,25 @@ export function createHorse({
   position,
   rotationY = 0,
   coatColor = null,
+  maneColor = null,
+  label = null,
+  speed = null,
+  hungerSeconds = null,
+  scale: scaleOverride = null,
+  markings = null,
+  grown = 1,
+  bred = false,
+  coat: coatKey = null,
 } = {}) {
-  // Look the kind up. An unknown kind quietly falls back to a chestnut, so a
-  // typo (or an old save file) can never crash the game.
-  const kindKey = HORSE_KINDS[kind] ? kind : DEFAULT_KIND;
-  const breed = HORSE_KINDS[kindKey];
-  const scale = breed.scale;
+  // Look the kind up. An unknown kind quietly falls back to a chestnut's
+  // numbers, so a typo (or an old save file) can never crash the game - and a
+  // bred horse, whose "kind" is its coat ('palomino'), simply takes every one
+  // of its own numbers from the extras above.
+  const breed = HORSE_KINDS[kind] ?? HORSE_KINDS[DEFAULT_KIND];
+
+  // How big a GROWN-UP one of these is. A foal starts smaller than this and
+  // grows into it (see applyGrowth at the bottom of the file).
+  const adultScale = Number.isFinite(scaleOverride) ? scaleOverride : breed.scale;
 
   // The outer group: never scaled, so Natalia keeps her own size when she is
   // added to it as a rider.
@@ -300,14 +380,16 @@ export function createHorse({
   // scaled. Shrink this and the horse gets smaller; the rider does not.
   const frame = new THREE.Group();
   frame.name = 'frame';
-  frame.scale.setScalar(scale);
   horse.add(frame);
 
-  // A foal's random coat (Phase 7) overrides whatever the kind says.
+  // A foal's random coat (Phase 7) overrides whatever the kind says, and so
+  // does its mane colour: a palomino's creamy mane is half of what makes it
+  // look like a palomino.
   const finalCoat = coatColor === null ? breed.coat : coatColor;
+  const finalMane = maneColor === null ? breed.mane : maneColor;
   const coat = mat(finalCoat);
-  const hair = mat(breed.mane);
-  const hoofColor = mat(breed.hoof);
+  const hair = mat(finalMane);
+  const hoofColor = mat(maneColor === null ? breed.hoof : maneColor);
 
   // Four legs with darker hooves. The horse looks along +Z, so the front legs
   // are the ones at z = +0.7, and its own left-hand side is +X.
@@ -351,6 +433,11 @@ export function createHorse({
   tail.rotation.x = 0.35;
   body.add(tail);
 
+  // Spots or patches, if this coat has any (Phase 7: spotted and pinto foals).
+  if (markings && Number.isFinite(markings.color)) {
+    buildMarkings(body, markings.style, markings.color);
+  }
+
   // The tack. Both pieces are children of the body, so they bob with the
   // barrel and shrink with the horse. Both start hidden.
   const blanketParts = buildBlanket();
@@ -361,9 +448,9 @@ export function createHorse({
   // The floating hunger bar rides along as a child of the OUTER group, so we
   // can place it in real world units. It is scaled to match the horse, so a
   // pony gets a pony-sized bar.
+  // (Its size and height are set by applyGrowth further down, along with the
+  // horse's own, so a foal gets a foal-sized bar that grows with it.)
   const bar = createHungerBar({ width: BAR_WIDTH, thickness: BAR_THICKNESS, depth: BAR_DEPTH });
-  bar.holder.scale.setScalar(scale);
-  bar.holder.position.y = BACK_TOP * scale + BAR_ABOVE_BACK;
   horse.add(bar.holder);
 
   if (position) horse.position.copy(position);
@@ -398,29 +485,52 @@ export function createHorse({
     backLeft.rotation.x = -a;
 
     // A small bounce in the body, twice per stride, the way the girls bob.
-    body.position.y = Math.abs(Math.sin(phase)) * BODY_BOB * swing;
+    // bodyLift is how far the body has to sit ABOVE its usual place because
+    // this horse is a leggy foal; it is 0 for every grown horse.
+    body.position.y =
+      horse.userData.bodyLift + Math.abs(Math.sin(phase)) * BODY_BOB * swing;
   }
+
+  // The stats this horse plays with. A starting horse takes them from its
+  // breed; a bred one (Phase 7) is handed its own, mixed from its parents.
+  const finalSpeed = Number.isFinite(speed) ? speed : breed.speed;
+  const finalHungerSeconds =
+    Number.isFinite(hungerSeconds) && hungerSeconds > 0
+      ? hungerSeconds
+      : breed.hungerSeconds;
 
   // Everything the game needs to know about this horse lives here.
   horse.userData = {
-    id,                    // for the save file: 'h1', 'h2', ...
+    id,                    // for the save file: 'h1', 'h2', ... (foals: 'f1')
     name,                  // 'Biscuit'
-    kind: kindKey,         // 'chestnut' | 'white' | 'black' | 'pony'
-    label: breed.label,    // 'Chestnut' - the pretty version, for menus
+    kind,                  // 'chestnut' | 'white' | 'black' | 'pony', or a
+                           // Phase 7 coat name such as 'palomino'
+    label: label ?? breed.label,   // 'Chestnut' - the pretty version, for menus
     hunger: MAX_HUNGER,    // 100 = just fed, 0 = starving
     // How fast this horse gallops, in units a second. riding.js reads it.
-    speed: breed.speed,
-    // Hunger points lost per second, worked out from the kind's hungerSeconds:
+    speed: finalSpeed,
+    // How long its bar takes to empty, and the same thing as points a second:
     // a bar that empties in 60 seconds loses 100 / 60 points a second.
-    hungerDrainPerSecond: MAX_HUNGER / breed.hungerSeconds,
-    scale,                 // how big this horse is next to a normal one
+    hungerSeconds: finalHungerSeconds,
+    hungerDrainPerSecond: MAX_HUNGER / finalHungerSeconds,
+    // Phase 7: growing up. A starting horse is born grown (grown = 1), so
+    // "scale" and "adultScale" are the same number and nothing ever moves.
+    bred,                  // was it born on the ranch rather than built at the start?
+    coat: coatKey,         // which coat it was born with, for the save file
+    grown: 1,              // 0 = a newborn foal, 1 = a full-sized horse
+    isFoal: false,         // true while it is still too little to ride
+    growSecondsLeft: 0,    // how much growing up it has left to do
+    adultScale,            // how big it will be when it is all grown up
+    scale: adultScale,     // how big it is RIGHT NOW (applyGrowth sets this)
+    bodyLift: 0,           // how far a leggy foal's body sits above normal
     coatColor: finalCoat,
     saddle: 'none',        // which TACK_COLORS key it is wearing
     blanket: 'none',
-    // Real world-unit heights, for code outside this module:
-    backY: BACK_TOP * scale,   // the top of its back
-    saddleY: 0,                // where Natalia sits - filled in just below
-    barY: bar.holder.position.y,
+    // Real world-unit heights, for code outside this module. applyGrowth fills
+    // all three in properly a few lines below.
+    backY: BACK_TOP * adultScale,   // the top of its back
+    saddleY: 0,                // where Natalia sits
+    barY: 0,                   // how high the hunger bar floats
     head,                  // the mesh that bobs when we feed it
     headRestAngle: head.rotation.x,
     feedTimer: 0,          // counts down through the happy head-bob
@@ -437,15 +547,69 @@ export function createHorse({
     setMoving,             // call once a frame: swings the legs while walking
   };
 
-  // Work out where a rider sits. Doing it through the helper means the number
-  // is worked out in exactly one place, here and whenever the saddle changes.
-  refreshSaddleHeight(horse);
+  // Set its size, its legginess and all three heights (including where a rider
+  // sits). A grown horse passes grown = 1 and lands on exactly the numbers the
+  // game has always used; a newborn foal passes 0 and comes out little.
+  applyGrowth(horse, grown);
 
   // Draw the bar at the right size straight away, so it is never wrong on the
   // very first frame.
   refreshBar(horse);
 
   return horse;
+}
+
+// ---------------------------------------------------------------------------
+// applyGrowth - Phase 7: how grown up this horse is, from 0 (born this minute)
+// to 1 (a full-sized horse). Call it as often as you like; breeding.js calls it
+// every frame while a foal is growing, so the foal swells gently rather than
+// popping from small to big.
+//
+// Three things change together:
+//   * how big the animal is         FOAL_SCALE of its grown size, up to all of it
+//   * how leggy it is               a newborn's legs are FOAL_LEG_STRETCH long
+//   * every height measured off it  where a rider sits, where the bar floats
+//
+// The legs are stretched by moving each hip UP and scaling the leg by the same
+// amount, which leaves the hooves exactly on the grass; the body is then lifted
+// by the difference, so it still sits on top of the legs.
+// ---------------------------------------------------------------------------
+export function applyGrowth(horse, grown) {
+  const data = horse.userData;
+
+  // Anything odd (a hand-edited save, say) is treated as "all grown up".
+  const g = Number.isFinite(grown) ? Math.max(0, Math.min(1, grown)) : 1;
+  data.grown = g;
+
+  // Size, and how leggy: both slide from the foal number up to 1 as it grows.
+  const size = data.adultScale * (FOAL_SCALE + (1 - FOAL_SCALE) * g);
+  const stretch = FOAL_LEG_STRETCH + (1 - FOAL_LEG_STRETCH) * g;
+  const lift = HIP_HEIGHT * (stretch - 1);
+
+  data.scale = size;
+  data.bodyLift = lift;
+
+  data.frame.scale.setScalar(size);
+
+  for (const leg of data.legs) {
+    leg.position.y = HIP_HEIGHT * stretch;
+    leg.scale.y = stretch;
+  }
+
+  // The body sits on top of those longer legs. setMoving adds its walking
+  // bounce on top of this same number every frame.
+  data.body.position.y = lift;
+
+  // The heights other files read. The back is the top of the barrel, which the
+  // leggy lift has just raised, all of it shrunk by this horse's size.
+  data.backY = (BACK_TOP + lift) * size;
+  data.barHolder.scale.setScalar(size);
+  data.barHolder.position.y = data.backY + BAR_ABOVE_BACK;
+  data.barY = data.barHolder.position.y;
+
+  // Where a rider's feet end up. (A foal cannot be ridden at all, but the sum
+  // is the same one, and it is right the moment the foal grows up.)
+  refreshSaddleHeight(horse);
 }
 
 // ---------------------------------------------------------------------------
@@ -458,7 +622,10 @@ export function createHorse({
 function refreshSaddleHeight(horse) {
   const data = horse.userData;
   const lift = data.saddle === 'none' ? 0 : SADDLE_LIFT;
-  data.saddleY = (BACK_TOP - RIDER_SIT_DROP) * data.scale + lift;
+  // bodyLift is the extra height a leggy foal's back has; it is 0 for a grown
+  // horse, so this is exactly the sum Phase 3 used.
+  data.saddleY =
+    (BACK_TOP - RIDER_SIT_DROP + data.bodyLift) * data.scale + lift;
 }
 
 // ---------------------------------------------------------------------------

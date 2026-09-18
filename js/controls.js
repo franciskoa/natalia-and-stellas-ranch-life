@@ -350,9 +350,15 @@ export function createControls(player, camera, domElement, bounds) {
 
   // Add a round thing to walk around. We keep the object, not its numbers, so
   // the no-go circle follows it if it moves.
+  //
+  // It hands the entry back, so a thing that CHANGES SIZE can keep its circle
+  // in step: Phase 7's foals grow, and main.js simply writes a new radius into
+  // the entry it was given here.
   function addObstacle(object, radius) {
-    if (!object) return;
-    obstacles.push({ object, radius });
+    if (!object) return null;
+    const entry = { object, radius };
+    obstacles.push(entry);
+    return entry;
   }
 
   // --- one frame of movement ------------------------------------------------
