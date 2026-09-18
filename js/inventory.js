@@ -13,8 +13,20 @@
 // oats to the chickens, and the horses will not eat corn. That is the whole
 // reason there are two keys rather than one "feed" number.
 //
+// Phase 6 adds the four things the NEIGHBOURS farm, which she gets by swapping
+// baskets with them at their farm gates (see trade.js):
+//
+//   corn         sweetcorn from the Garcia farm
+//   milk         a bottle from the Miller dairy
+//   wool         a bundle from the Nguyen flock
+//   apples       a basket from the Okafor orchard
+//
+// They all start at 0: the only way to get any is to go and trade for them.
+//
 // What this module gives the rest of the game:
 //
+//   ITEM_KEYS                     everything that can be counted
+//   ITEM_ICONS                    the one emoji each of them is drawn with
 //   STARTING_INVENTORY            what a brand new game begins with
 //   createInventory(initial)   -> { get, add, spend, all, setAll, onChange }
 //   createHud(inventory, getChickenCount) -> { refresh }
@@ -22,18 +34,26 @@
 // Nothing here knows about Three.js, the save file or the coop. It just counts.
 
 // ---------------------------------------------------------------------------
-// The four things we count. Anything not on this list is ignored, so a
+// The eight things we count. Anything not on this list is ignored, so a
 // hand-edited save file cannot invent a "diamonds" pile.
 // ---------------------------------------------------------------------------
-export const ITEM_KEYS = ['coins', 'horseFeed', 'chickenFeed', 'eggs'];
+export const ITEM_KEYS = [
+  'coins', 'horseFeed', 'chickenFeed', 'eggs',
+  'corn', 'milk', 'wool', 'apples',
+];
 
 // What a brand new ranch starts with: enough feed to try everything out once,
-// and a few coins to spend at the store.
+// and a few coins to spend at the store. The neighbours' goods start at 0 -
+// they have to be traded for.
 export const STARTING_INVENTORY = {
   coins: 20,
   horseFeed: 3,
   chickenFeed: 5,
   eggs: 0,
+  corn: 0,
+  milk: 0,
+  wool: 0,
+  apples: 0,
 };
 
 // A whole number of at least zero. A save file (or a typo) can hold anything,
@@ -144,6 +164,26 @@ export function createInventory(initial) {
 }
 
 // ---------------------------------------------------------------------------
+// THE ICONS - one emoji per thing, used by the HUD here AND by the trade panel
+// in trade.js, so a bottle of milk is the same 🥛 everywhere in the game.
+//
+// 🌽 already belongs to CHICKEN FEED (it has since Phase 5, and it is written
+// into the store, the coop prompt and the messages), so the neighbours' corn
+// takes 🍿 instead - which an eight-year-old reads as "corn" just as quickly,
+// and nothing else in the game uses.
+// ---------------------------------------------------------------------------
+export const ITEM_ICONS = {
+  coins: '🪙',
+  horseFeed: '🌾',
+  chickenFeed: '🌽',
+  eggs: '🥚',
+  corn: '🍿',
+  milk: '🥛',
+  wool: '🧶',
+  apples: '🍎',
+};
+
+// ---------------------------------------------------------------------------
 // THE HUD - the little row of numbers in the top-left corner.
 //
 // It is plain HTML, not 3D, and it is deliberately tiny and quiet, like the
@@ -151,9 +191,16 @@ export function createInventory(initial) {
 //
 //   🪙 20 · 🌾 3 · 🌽 5 · 🥚 0 · 🐔 4
 //   coins · horse feed · chicken feed · eggs · chickens
+//   🍿 3 corn · 🥛 1 milk
 //
-// The little legend underneath (and the hover text) is there because an
-// eight-year-old should not have to guess what 🌾 means.
+// The little legend under the first line (and the hover text) is there because
+// an eight-year-old should not have to guess what 🌾 means.
+//
+// THE SECOND LINE is the neighbours' goods, and it only appears once she OWNS
+// some: a brand new game shows nothing at all, and every good she has traded
+// for is written out with its own word beside it, so that line never needs a
+// legend of its own. Four more numbers on the top line from the very first
+// frame would have crowded it for no reason.
 //
 //   createHud(inventory, getChickenCount) -> { refresh }
 //
@@ -162,32 +209,37 @@ export function createInventory(initial) {
 // changes. The inventory numbers refresh themselves, through onChange.
 // ---------------------------------------------------------------------------
 
-// The icon shown for each thing, in the order they appear on screen.
-const HUD_ICONS = {
-  coins: '🪙',
-  horseFeed: '🌾',
-  chickenFeed: '🌽',
-  eggs: '🥚',
+// The things on the top line, in the order they appear on screen.
+const HUD_MAIN_KEYS = ['coins', 'horseFeed', 'chickenFeed', 'eggs'];
+
+// The things on the second line, with the word shown beside each number.
+const HUD_GOODS_KEYS = ['corn', 'milk', 'wool', 'apples'];
+const HUD_GOODS_WORDS = {
+  corn: 'corn',
+  milk: 'milk',
+  wool: 'wool',
+  apples: 'apples',
 };
 
-// The words under the icons, in the same order, with the chickens on the end.
+// The words under the top line, in the same order, with the chickens on the end.
 const HUD_LEGEND = 'coins · horse feed · chicken feed · eggs · chickens';
 
 export function createHud(inventory, getChickenCount) {
-  // These two <div>s live in index.html. If the page does not have them (a
-  // test harness, say) everything below still runs and simply draws nothing.
+  // These <div>s live in index.html. If the page does not have them (a test
+  // harness, say) everything below still runs and simply draws nothing.
   const itemsElement = document.getElementById('hud-items');
   const hudElement = document.getElementById('hud');
   const legendElement = document.getElementById('hud-legend');
+  const goodsElement = document.getElementById('hud-goods');
 
   if (legendElement) legendElement.textContent = HUD_LEGEND;
   if (hudElement) hudElement.setAttribute('title', HUD_LEGEND);
 
-  // Build the one line of text and put it on screen.
+  // Build the lines of text and put them on screen.
   function refresh() {
     const parts = [];
-    for (const key of ITEM_KEYS) {
-      parts.push(`${HUD_ICONS[key]} ${inventory.get(key)}`);
+    for (const key of HUD_MAIN_KEYS) {
+      parts.push(`${ITEM_ICONS[key]} ${inventory.get(key)}`);
     }
     // The chickens are not an inventory item - they are animals standing in
     // the pen - so their number is asked for separately.
@@ -195,6 +247,17 @@ export function createHud(inventory, getChickenCount) {
     parts.push(`🐔 ${chickens}`);
 
     if (itemsElement) itemsElement.textContent = parts.join(' · ');
+
+    // The neighbours' goods: only the ones she actually has, each with its
+    // word. Nothing traded for yet means an empty line, which the CSS hides
+    // altogether so the HUD stays exactly as small as it was before.
+    const goods = [];
+    for (const key of HUD_GOODS_KEYS) {
+      const count = inventory.get(key);
+      if (count > 0) goods.push(`${ITEM_ICONS[key]} ${count} ${HUD_GOODS_WORDS[key]}`);
+    }
+
+    if (goodsElement) goodsElement.textContent = goods.join(' · ');
   }
 
   // Whenever a number in the pocket changes, redraw. That covers feeding,

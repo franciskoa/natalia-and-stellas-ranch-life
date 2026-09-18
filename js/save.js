@@ -22,18 +22,26 @@
 // Version 3 (Phase 5, market stall) adds coop.chicks: a list with one number in
 //   it per chick in the pen - how many seconds that chick still has to grow
 //   before it is a full chicken.
+// Version 4 (Phase 6, trading) adds the four things the neighbours farm to her
+//   pocket: inventory.corn, inventory.milk, inventory.wool and inventory.apples.
 //
 // Older saves still load. The parts they do not have simply get the new-game
-// defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, four chickens with
-// a full bar), and a save with no "chicks" list means what it says: every
-// chicken in that pen is grown up. Nobody loses the horses they dressed up in
-// Phase 4 just because the game learned about chickens.
+// defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, none of the
+// neighbours' goods, four chickens with a full bar), and a save with no
+// "chicks" list means what it says: every chicken in that pen is grown up.
+// Nobody loses the horses they dressed up in Phase 4 just because the game
+// learned about chickens - or a basket of eggs because it learned about corn.
 //
-// WHY BUMP THE NUMBER RATHER THAN QUIETLY ADD THE FIELD? Because the version is
-// the one place that says what a save is meant to contain, and "3" is how a
-// future slice can tell a save that knows about chicks from one that predates
-// them. Reading old saves costs nothing (OLDEST_READABLE_VERSION is still 1),
-// so there is no reason not to be honest about the shape.
+// A version 1-3 save simply has no corn, milk, wool or apples in its inventory
+// block. inventory.setAll only touches the keys it is GIVEN, and a fresh
+// pocket starts every one of those at 0, so an old save quietly lands on 0 of
+// each without a single line of conversion code.
+//
+// WHY BUMP THE NUMBER RATHER THAN QUIETLY ADD THE FIELDS? Because the version
+// is the one place that says what a save is meant to contain, and "4" is how a
+// future slice can tell a save that knows about the neighbours' goods from one
+// that predates them. Reading old saves costs nothing (OLDEST_READABLE_VERSION
+// is still 1), so there is no reason not to be honest about the shape.
 // ---------------------------------------------------------------------------
 //
 // ---------------------------------------------------------------------------
@@ -59,7 +67,7 @@ import { STARTING_INVENTORY } from './inventory.js';
 export const SAVE_KEY = 'ranchLifeSave';
 
 // The shape of the save file we WRITE.
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 // The oldest shape we can still READ. Anything between this and SAVE_VERSION
 // is loaded and quietly brought up to date (see applyState).
@@ -191,14 +199,15 @@ export function clearSave() {
 //
 // The shape:
 //   {
-//     version: 2,
+//     version: 4,
 //     savedAt: 1758200000000,                 // Date.now(), just for humans
 //     player: { x, z, rotationY },
 //     horses: [
 //       { id, name, kind, hunger, saddle, blanket, x, z, rotationY },
 //       ...
 //     ],
-//     inventory: { coins, horseFeed, chickenFeed, eggs },
+//     inventory: { coins, horseFeed, chickenFeed, eggs,
+//                  corn, milk, wool, apples },
 //     coop: { hunger, chickens, eggsOnGround, eggTimer, chicks: [12.5, ...] }
 //   }
 //
@@ -254,8 +263,9 @@ export function collectState({ natalia, horses, inventory, coop } = {}) {
       };
     }),
 
-    // Her pocket: coins, horse feed, chicken feed, eggs. inventory.all()
-    // already hands back a plain copy, which is exactly what JSON wants.
+    // Her pocket: coins, both kinds of feed, eggs, and the four things she has
+    // traded for with the neighbours. inventory.all() already hands back a
+    // plain copy, which is exactly what JSON wants.
     inventory: inventory ? inventory.all() : { ...STARTING_INVENTORY },
 
     // The coop: one shared hunger, how many chickens are in the pen, how many
@@ -349,12 +359,21 @@ export function applyState(
   // --- her pocket -----------------------------------------------------------
   // A version 1 save has no "inventory" at all. setAll only touches the keys
   // it is given, so passing the new-game amounts in that case leaves her with
-  // 20 coins and a little feed rather than an empty pocket.
+  // 20 coins and a little feed rather than an empty pocket. A version 2 or 3
+  // save HAS an inventory, but one with no corn, milk, wool or apples in it -
+  // and for the same reason those simply stay at the 0 a fresh pocket holds.
   if (inventory) {
     const saved = state.inventory;
-    inventory.setAll(
-      saved && typeof saved === 'object' ? saved : { ...STARTING_INVENTORY }
-    );
+
+    // The new-game amounts FIRST, then whatever the save actually holds on top
+    // of them. Written this way round, loading a save always leaves the pocket
+    // holding exactly what that save said and nothing else: a version 3 file
+    // (which has no corn, milk, wool or apples in it) lands on 0 of each even
+    // if the pocket it is being loaded into was full of them a moment ago.
+    inventory.setAll({
+      ...STARTING_INVENTORY,
+      ...(saved && typeof saved === 'object' ? saved : {}),
+    });
   }
 
   // --- the chicken coop -----------------------------------------------------

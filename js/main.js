@@ -17,6 +17,13 @@
 // sells now have to GROW UP before they can be sold or lay anything, so buying
 // a chick for 8 and selling it for 10 is not a way to print money.
 //
+// Phase 6: four neighbour farms out along the road - the Garcias' corn, the
+// Millers' cows, the Nguyens' sheep and the Okafors' apples - and a trade panel
+// at each farm gate. Press E next to a neighbour and swap a basket of eggs for
+// sweetcorn, milk, wool or apples, or for feed for the animals at home. No
+// coins change hands: a trade is goods for goods, and the market stall back at
+// the ranch gate is where the new goods turn into money.
+//
 // Phase 5 (earlier slices): a pocket with coins and two different kinds of feed,
 // shown as a little row of numbers in the top-left corner, and a chicken coop
 // beside the house - four chickens pottering about a fenced pen, a shared
@@ -38,7 +45,8 @@ import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
 import { createBarnMenu } from './menu.js';
 import { createShopMenu } from './shop.js';
-import { createInventory, createHud } from './inventory.js';
+import { createTradeMenu } from './trade.js';
+import { createInventory, createHud, ITEM_ICONS } from './inventory.js';
 import { createCoop, MAX_CHICKENS } from './chickens.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 
@@ -608,9 +616,39 @@ interactions.register({
 // The prices:
 //   chicken  10 coins   (a chick from the store costs 8, but has to grow first)
 //   egg       2 coins   (one at a time, or the whole basket at once)
+//   corn      2 coins   \
+//   apples    2 coins    |  what the neighbours grow (Phase 6). This is what
+//   milk      6 coins    |  makes the walk down a lane worth it: two eggs
+//   wool     12 coins   /   (4 coins) come back as three corn (6 coins).
+//
+// The four goods are sold one at a time, so the row says exactly what one of
+// them is worth. A row for something she has none of greys itself out and says
+// so, the same way the egg rows do before the hens have laid anything.
 // ---------------------------------------------------------------------------
 const CHICKEN_PRICE = 10;
 const EGG_PRICE = 2;
+
+// One row of the market stall for one of the neighbours' goods.
+//   key    the inventory key ('corn')
+//   label  the words on the row ('Corn')
+//   icon   its emoji, the same one the HUD and the trade panel use
+//   price  what one of them fetches, in coins
+function goodsRow(key, label, icon, price) {
+  return {
+    key,
+    icon,
+    // The number in brackets is how many she is carrying, so the row is worth
+    // reading even when the button is greyed out.
+    label: () => `${label} (${inventory.get(key)})`,
+    price,
+    canBuy: () => (inventory.get(key) >= 1 ? true : `No ${label.toLowerCase()} yet`),
+    refused: `No ${label.toLowerCase()} yet`,
+    give: () => {
+      if (!inventory.spend(key, 1)) return false;
+      return `Sold ${label.toLowerCase()}! (${icon} ${inventory.get(key)} left)`;
+    },
+  };
+}
 
 const MARKET_ITEMS = [
   {
@@ -663,6 +701,12 @@ const MARKET_ITEMS = [
       return `The baker took all ${eggs} of them! (🪙 +${eggs * EGG_PRICE})`;
     },
   },
+  // What the neighbours grow. The icons come from inventory.js, so a bottle of
+  // milk is the same 🥛 on the HUD, in the trade panel and here.
+  goodsRow('corn', 'Corn', ITEM_ICONS.corn, 2),
+  goodsRow('apples', 'Apples', ITEM_ICONS.apples, 2),
+  goodsRow('milk', 'Milk', ITEM_ICONS.milk, 6),
+  goodsRow('wool', 'Wool', ITEM_ICONS.wool, 12),
 ];
 
 const marketMenu = createShopMenu({
@@ -774,30 +818,38 @@ interactions.register({
 });
 
 // ===========================================================================
-// THE NEIGHBOURS - PLACEHOLDER "TALK TO" ACTION
+// THE NEIGHBOURS - TRADING
 // ===========================================================================
 //
-// >>> TRADING GOES HERE. <<<
+// One panel serves all four families: tradeMenu.open(farm) fills it in with
+// that family's name, their greeting and their two or three swaps. Who offers
+// what is a plain data table in trade.js (TRADE_OFFERS), so changing a price -
+// or adding a fifth family - never means touching this file.
 //
-// This one block is the whole of what pressing E at a neighbour does today:
-// they say hello. The next slice of Phase 6 (trading eggs for corn and so on)
-// replaces the onPress below with "open the trade panel for this farm", and
-// nothing else in this file has to change - the loop is driven by
-// neighbors.farms, and every farm entry already carries everything a trade
-// panel needs:
+// Every farm entry from neighbors.js already carries what the panel needs:
 //
-//   farm.id         'corn' | 'dairy' | 'sheep' | 'apple'
-//   farm.name       'Mrs. Garcia'          (what the prompt says)
-//   farm.family     'The Garcia farm'      (a panel title)
+//   farm.id         'corn' | 'dairy' | 'sheep' | 'apple'  (which offers to show)
+//   farm.name       'Mrs. Garcia'          (what the prompt and greeting say)
+//   farm.family     'The Garcia farm'      (the panel title)
 //   farm.specialty  'corn' | 'milk' | 'wool' | 'apples'
-//   farm.colors     the family's palette, incl. colors.family
 //   farm.person     the neighbour themself (what we measure distances to)
-//   farm.anchor     a "stand here" spot in the yard
-//   farm.position   { x, z } of the farmyard
 //
-// Talking is on foot only, the same rule as the barn, the store and the market
+// Trading is on foot only, the same rule as the barn, the store and the market
 // stall: you cannot lean down out of the saddle to swap a basket of eggs.
 // ===========================================================================
+const tradeMenu = createTradeMenu({
+  inventory,
+  controls,
+  interactions,
+  // After every swap: redraw the row of numbers and write the ranch out, so a
+  // bundle of wool never vanishes because the tab was closed a second later.
+  // (This is the same pair of lines the store and the market stall use.)
+  onTrade: () => {
+    hud.refresh();
+    saveAndShow();
+  },
+});
+
 for (const farm of neighbors.farms) {
   interactions.register({
     object: farm.person,
@@ -806,11 +858,10 @@ for (const farm of neighbors.farms) {
       {
         key: 'KeyE',
         getLabel: () =>
-          riding.isRiding() ? 'Get off your horse first' : `Talk to ${farm.name}`,
+          riding.isRiding() ? 'Get off your horse first' : `Trade with ${farm.name}`,
         onPress: () => {
           if (riding.isRiding()) return;   // the label already said why
-          // PLACEHOLDER: the trade panel replaces this line.
-          interactions.showMessage('Hello, Natalia! Come back soon to trade.', 2.5);
+          tradeMenu.open(farm);
         },
       },
     ],
@@ -886,12 +937,13 @@ function update(dt) {
   // 6. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
   //    E and F. While the barn menu is open this does nothing.
   interactions.update(dt);
-  // 7. The two panels get their frame too. Neither has anything to animate
+  // 7. The panels get their frame too. None of them has anything to animate
   //    today, but calling them means this loop never has to change if that
   //    alters.
   barnMenu.update(dt);
   shopMenu.update(dt);
   marketMenu.update(dt);
+  tradeMenu.update(dt);
   // 8. Turn the little compass arrow at the top of the screen. While she is
   //    riding, Natalia is a child of the horse, and updateCompass reads her
   //    WORLD position, so it points the right way either way.
@@ -945,6 +997,7 @@ window.ranch = {
   barnMenu,
   shopMenu,
   marketMenu,
+  tradeMenu,
   renderer,
   update,
   save,

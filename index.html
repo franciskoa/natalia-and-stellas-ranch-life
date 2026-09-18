@@ -84,6 +84,24 @@
       opacity: 0.62;
     }
 
+    /* The second line: what she has traded for with the neighbours, e.g.
+       "🍿 3 corn · 🥛 1 milk". js/inventory.js only writes the goods she
+       actually owns into it, and each one carries its own word, so this line
+       needs no legend of its own. */
+    #hud-goods {
+      margin-top: 3px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffe6a8;                /* a warm cream, so it reads as "extra" */
+    }
+
+    /* Nothing traded for yet: an empty line would still push the box taller,
+       so it is taken out of the layout altogether until there is something
+       in it. */
+    #hud-goods:empty {
+      display: none;
+    }
+
     /* The key names at the start of each line ("Move:", "E:"), a touch
        brighter so the eye can scan down the left edge of the list. */
     #hint b {
@@ -97,12 +115,12 @@
     #prompt {
       position: fixed;
       left: 50%;
-      /* Clear of the four-line hint box in the bottom-left corner. Four lines
-         at 13px and a line-height of 1.4 come to 73px, plus 12px of padding,
-         which puts the top of that box 97px up from the bottom of the screen.
-         104px leaves a small gap above it and still clears the shorter box on
-         a phone (four lines at 11px: about 86px). */
-      bottom: 104px;
+      /* Clear of the five-line hint box in the bottom-left corner. Five lines
+         at 13px and a line-height of 1.4 come to 91px, plus 12px of padding
+         and 12px of margin, which puts the top of that box 115px up from the
+         bottom of the screen. 122px leaves a small gap above it and still
+         clears the shorter box on a phone (five lines at 11px: about 101px). */
+      bottom: 122px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -570,6 +588,24 @@
       cursor: default;
     }
 
+    /* THE MARKET STALL is the one panel with a long list: a chicken, two egg
+       rows and the four things the neighbours grow come to seven. Its rows are
+       a notch shallower than the store's so the whole stall - including the
+       Close button - still fits on an ordinary laptop screen without anybody
+       having to scroll. (The panel can scroll, and does on a phone; it is just
+       not something an eight-year-old should have to discover.) */
+    .shop-menu[data-shop="market"] .shop-item {
+      padding: 6px 12px;
+    }
+
+    .shop-menu[data-shop="market"] .shop-buy {
+      min-height: 42px;
+    }
+
+    .shop-menu[data-shop="market"] .shop-item-icon {
+      font-size: 26px;
+    }
+
     /* The line that answers back: "Bought horse feed! (🌾 4)". It keeps its
        height even when it is empty, so nothing jumps about when it changes. */
     .shop-note {
@@ -598,6 +634,57 @@
       .shop-item-icon {
         font-size: 24px;
         width: 32px;
+      }
+    }
+
+    /* -----------------------------------------------------------------
+       THE TRADE PANEL
+       The panel that opens when the player presses E next to a neighbour.
+       js/trade.js builds it out of the very same pieces as the two shops
+       (.barn-menu, .barn-panel, .barn-title, .shop-list, .shop-item,
+       .shop-buy, .shop-note, .barn-close), so all four panels in the game
+       look like brothers. Only the three rules below are its own.
+
+       A trade costs no coins at all, so there is no "You have 🪙 20" line
+       here - .trade-pocket counts out the things this family swaps instead.
+       ----------------------------------------------------------------- */
+
+    /* "You have 🥚 4 · 🍿 0" - only the things this neighbour's offers are
+       about, so it never turns into the whole pocket. */
+    .trade-pocket {
+      margin: -6px 0 14px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #ffe082;
+    }
+
+    /* The swap in pictures, under the words: "🥚 2 → 🍿 3". It is the line a
+       player who is not reading yet actually uses, so it is bigger than the
+       price line it stands in for. */
+    .trade-swap {
+      font-size: 19px;
+      line-height: 1.25;
+      color: #ffe082;
+    }
+
+    /* The neighbour's own line ("Mrs. Garcia: “Hello Natalia!...”") is a
+       little roomier than a shop's one-line intro, because it is somebody
+       talking rather than a sign over a counter. */
+    .trade-menu .shop-intro {
+      margin: -4px 0 12px;
+      font-size: 15px;
+      line-height: 1.35;
+      font-style: italic;
+      color: #dbe4ee;
+    }
+
+    @media (max-width: 700px) {
+      .trade-pocket {
+        font-size: 16px;
+      }
+
+      .trade-swap {
+        font-size: 17px;
       }
     }
 
@@ -662,17 +749,21 @@
   <div id="hud" title="coins · horse feed · chicken feed · eggs · chickens">
     <div id="hud-items">🪙 20 · 🌾 3 · 🌽 5 · 🥚 0 · 🐔 4</div>
     <div id="hud-legend">coins · horse feed · chicken feed · eggs · chickens</div>
+    <!-- What she has traded for with the neighbours, e.g. "🍿 3 corn".
+         It stays empty - and hidden - until she owns some of something. -->
+    <div id="hud-goods"></div>
   </div>
 
-  <!-- On-screen controls hint: four short lines, tucked in the corner. It is
+  <!-- On-screen controls hint: five short lines, tucked in the corner. It is
        deliberately this short - the "Press E to ..." prompt in the middle of
        the screen already says what E does at each place, so the corner only
-       has to cover the keys themselves. -->
+       has to cover the keys themselves and where to go. -->
   <div id="hint">
     <b>Move:</b> W A S D / arrows<br>
     <b>Look:</b> drag mouse<br>
     <b>E:</b> use / ride&nbsp;&nbsp;&nbsp;<b>F:</b> feed<br>
-    Follow the compass to the store
+    Follow the compass to the store<br>
+    Visit neighbours to trade
   </div>
 
   <!-- The compass badge at the top of the screen. js/road.js turns the arrow
