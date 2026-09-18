@@ -16,6 +16,9 @@
 //   snapCamera()           - put the camera straight behind the subject now,
 //                            with no gliding (main.js uses it after a save
 //                            file has moved Natalia somewhere else)
+//   orbit(dt)              - drift the camera slowly round the subject without
+//                            moving anybody. The title screen uses it so the
+//                            ranch looks alive while the game itself is on hold
 //   addObstacle(obj, r)    - a round thing to walk around that can move about
 //   addBlockBox(box)       - a rectangle on the ground nobody may walk into,
 //                            given as { minX, maxX, minZ, maxZ }. The house
@@ -55,6 +58,9 @@ const MOUSE_SENSITIVITY = 0.005;
 const CAMERA_SMOOTHING = 8;  // higher = the camera keeps up more tightly
 const SWITCH_SMOOTHING = 4;  // how fast the camera glides to its new distance
                              // and height after climbing on or off a horse
+const ORBIT_SPEED = 0.09;    // how fast the camera drifts round the ranch while
+                             // the title screen is up, in radians a second: a
+                             // whole turn takes a little over a minute
 
 // Keys we care about. Using event.code means the keys work on any keyboard
 // layout (a French AZERTY keyboard still reports "KeyW" for the same key).
@@ -488,6 +494,18 @@ export function createControls(player, camera, domElement, bounds) {
     moveCamera(0, true);
   }
 
+  // Swing the camera slowly round the subject, without anybody moving an inch.
+  // The title screen calls this every frame instead of update(), so the ranch
+  // drifts gently past behind the big Play button while the game itself is
+  // completely on hold. Nothing else in the game uses it.
+  //
+  // It places the camera exactly (snap), because there is nothing to catch up
+  // with: the drift IS the movement.
+  function orbit(dt, speed = ORBIT_SPEED) {
+    yaw += speed * dt;
+    moveCamera(dt, true);
+  }
+
   // setEnabled(false) switches the keyboard and the mouse drag off while a
   // menu is open. update() still runs the camera, so the world keeps looking
   // alive behind the panel. setEnabled(true) hands the controls back.
@@ -545,6 +563,7 @@ export function createControls(player, camera, domElement, bounds) {
     getSubject,
     setEnabled,
     snapCamera,
+    orbit,
     addObstacle,
     addBlockBox,
     isSpotFree: isSpotFreeHere,

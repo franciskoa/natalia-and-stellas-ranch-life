@@ -74,6 +74,10 @@
 // Everything else - opening, closing, Esc, switching the game's keyboard off -
 // works exactly the same in both.
 
+// Every picture in the game comes out of this one table, so the coins counted
+// at the top of a shop are the same 🪙 the HUD shows in the corner.
+import { ITEM_ICONS } from './inventory.js';
+
 // The CSS class index.html uses to show a panel. No class = hidden.
 const VISIBLE_CLASS = 'visible';
 
@@ -305,13 +309,13 @@ export function createShopMenu({
 
   // --- keeping the panel in step with her pocket ----------------------------
   function refresh() {
-    coinsLine.textContent = `You have 🪙 ${inventory ? inventory.get('coins') : 0}`;
+    coinsLine.textContent = `You have ${ITEM_ICONS.coins} ${inventory ? inventory.get('coins') : 0}`;
 
     for (const entry of rows) {
       // The words and the price first: a row like "All eggs (3)" has to redraw
       // itself every time anything changes.
       entry.labelLine.textContent = labelOf(entry.item);
-      entry.priceLine.textContent = `🪙 ${priceOf(entry.item)}`;
+      entry.priceLine.textContent = `${ITEM_ICONS.coins} ${priceOf(entry.item)}`;
 
       const why = blockedReason(entry.item);
       entry.button.disabled = !!why;

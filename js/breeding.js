@@ -36,6 +36,9 @@
 // asks for it through the addHorse callback it is handed.
 
 import { createHorse, applyGrowth, FOAL_SCALE } from './horse.js';
+// One table holds every picture in the game, so the sack of oats named here is
+// the same 🌾 the HUD and the store draw.
+import { ITEM_ICONS } from './inventory.js';
 
 // ---------------------------------------------------------------------------
 // THE COATS. Eleven of them, so the same colour rarely comes up twice running.
@@ -356,7 +359,9 @@ export function createBreeding({
     if (isFoal(dad)) return dad.userData.name + ' is still a foal';
 
     const feed = inventory ? inventory.get('horseFeed') : 0;
-    if (feed < BREED_COST) return 'You need 🌾 ' + BREED_COST + ' horse feed';
+    if (feed < BREED_COST) {
+      return 'You need ' + ITEM_ICONS.horseFeed + ' ' + BREED_COST + ' horse feed';
+    }
 
     return '';
   }
@@ -396,7 +401,11 @@ export function createBreeding({
     // nothing if they are not both there, so nothing else can go wrong after
     // this line.
     if (!inventory.spend('horseFeed', BREED_COST)) {
-      return { ok: false, horse: null, message: 'You need 🌾 ' + BREED_COST + ' horse feed' };
+      return {
+        ok: false,
+        horse: null,
+        message: 'You need ' + ITEM_ICONS.horseFeed + ' ' + BREED_COST + ' horse feed',
+      };
     }
 
     const spec = makeFoalSpec({ mum, dad, herd });

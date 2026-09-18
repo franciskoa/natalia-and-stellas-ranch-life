@@ -51,6 +51,9 @@
 
 import { HORSE_KINDS, TACK_COLORS, setSaddle, setBlanket } from './horse.js';
 import { BREED_COST } from './breeding.js';
+// Every picture in the game comes out of this one table, so the sack of oats on
+// the "Have a foal!" button is the same 🌾 as the one in the HUD.
+import { ITEM_ICONS } from './inventory.js';
 
 // The CSS class index.html uses to show the panel. No class = hidden.
 const VISIBLE_CLASS = 'visible';
@@ -318,7 +321,8 @@ export function createBarnMenu({
     foalButton = document.createElement('button');
     foalButton.type = 'button';
     foalButton.className = 'barn-foal-go';
-    foalButton.textContent = 'Have a foal! (🌾 ' + BREED_COST + ')';
+    foalButton.textContent =
+      'Have a foal! (' + ITEM_ICONS.horseFeed + ' ' + BREED_COST + ')';
     foalButton.addEventListener('click', () => {
       const result = breeding.breed(mum, dad);
       if (result.ok) {

@@ -48,6 +48,16 @@
 // chicken feed and a new chick. A little compass at the top of the screen
 // always points at whichever of the two places she is not standing in.
 
+// Phase 8 (this slice): the front of the game. Every visit now opens on a
+// title screen - the name of the game in big friendly letters, one big button,
+// a sound switch and four little pictures showing which keys do what - with
+// the ranch turning slowly behind it and absolutely nothing in it moving until
+// Play is pressed. Esc (or the ☰ button in the corner) pauses the game and
+// brings up a small menu: Resume, sound, how to play, back to the title. And
+// the ranch has sound at last: soft blips, munches, coin dings and the clip-
+// clop of hooves, all invented by the browser on the spot (js/sound.js) and
+// all switchable off by a parent in one tap.
+
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
 import { buildRoad, updateCompass } from './road.js';
@@ -62,10 +72,12 @@ import { createBarnMenu } from './menu.js';
 import { createBreeding } from './breeding.js';
 import { createShopMenu } from './shop.js';
 import { createTradeMenu } from './trade.js';
-import { createInventory, createHud, ITEM_ICONS } from './inventory.js';
+import { createInventory, createHud, ITEM_ICONS, CHICKEN_ICON } from './inventory.js';
 import { createCoop, MAX_CHICKENS } from './chickens.js';
 import { createGarden, CROPS } from './garden.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
+import { createSound } from './sound.js';
+import { createTitleScreen, createPauseMenu, createTopButtons } from './title.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
 // white before Three.js starts drawing.
@@ -336,6 +348,98 @@ const interactions = createInteractions(
 const riding = createRiding({ natalia, stella, controls, interactions, scene });
 
 // ===========================================================================
+// PHASE 8 - SOUND, AND THE TWO WAYS THE GAME CAN BE ON HOLD
+// ===========================================================================
+//
+// sound.js invents every noise the ranch makes out of thin air with the Web
+// Audio API - there is not a single sound file in the project. It stays
+// completely silent until the player presses the big Play button on the title
+// screen, because that first tap is what browsers (rightly) insist on before a
+// page is allowed to make any noise at all.
+//
+// The switch remembers itself in its own corner of the browser's storage, NOT
+// inside the saved ranch, so turning the sound off and then starting a brand
+// new ranch does not turn it back on.
+// ---------------------------------------------------------------------------
+const sound = createSound();
+
+// ---------------------------------------------------------------------------
+// PAUSED. Two different things put the ranch on hold, and both use this one
+// flag: the title screen at the start of a visit, and the Esc menu in the
+// middle of a game. While it is true the game is still DRAWN - the animate()
+// loop at the bottom of this file keeps rendering - but update() is not called,
+// so nothing gets hungry, nothing grows and nobody moves.
+//
+// It starts as true, because the very first thing anybody sees is the title
+// screen.
+// ---------------------------------------------------------------------------
+let paused = true;
+
+function setPaused(value) {
+  paused = !!value;
+}
+
+// Is one of the four in-game panels up? (The barn menu, the store, the market
+// stall or a neighbour's trade panel.) It is written as a function declaration,
+// and it looks at consts that are created further down this file, because
+// nothing calls it until long after the whole file has run.
+function isPanelOpen() {
+  return barnMenu.isOpen() || shopMenu.isOpen()
+    || marketMenu.isOpen() || tradeMenu.isOpen();
+}
+
+// ---------------------------------------------------------------------------
+// THE PAUSE MENU (Esc), and the ☰ / 🔊 buttons in the top-right corner.
+//
+// IT IS BUILT HERE, BEFORE THE FOUR PANELS, AND THAT ORDER MATTERS. The barn
+// menu, the store, the market stall and the trade panel each already listen for
+// Esc to close themselves, and a browser calls keydown listeners in the order
+// they were added. Building the pause menu first means its listener is asked
+// FIRST: it sees that a panel is open, does nothing at all, and that panel's
+// own listener closes it a moment later. One press of Esc, one thing happens.
+// (There is a longer note about this at the top of title.js.)
+// ---------------------------------------------------------------------------
+const pauseMenu = createPauseMenu({
+  sound,
+  isPanelOpen,
+  // Esc on the title screen does nothing: there is nothing to pause yet.
+  isBusy: () => titleScreen.isOpen(),
+  onOpen: () => {
+    // Stop the ranch and take the keyboard away, exactly the way a panel does.
+    setPaused(true);
+    controls.setEnabled(false);
+    interactions.setEnabled(false);
+    // A good moment to write the ranch out: the player has stopped playing.
+    save();
+  },
+  onResume: () => {
+    setPaused(false);
+    controls.setEnabled(true);
+    interactions.setEnabled(true);
+  },
+  onBackToTitle: () => {
+    // Keep the ranch (so "Continue" really does continue), then put the front
+    // page back up over the top of it. The game stays paused the whole time.
+    save();
+    controls.setEnabled(false);
+    interactions.setEnabled(false);
+    setPaused(true);
+    titleScreen.show();
+  },
+});
+
+createTopButtons({
+  sound,
+  onMenu: () => {
+    // The ☰ button does exactly what Esc does, and with the same manners: it
+    // never opens on top of a panel or on top of the title screen.
+    if (titleScreen.isOpen()) return;
+    if (isPanelOpen()) return;
+    pauseMenu.open();
+  },
+});
+
+// ===========================================================================
 // PUTTING A HORSE IN THE WORLD
 //
 // One helper does the whole job, and both the three starting horses and every
@@ -392,6 +496,7 @@ function registerHorseInteractions(horse) {
           }
 
           riding.mount(horse);
+          sound.play('mount');
           interactions.showMessage(`Giddy up, ${data.name}!`);
           saveAndShow();
         },
@@ -410,12 +515,12 @@ function registerHorseInteractions(horse) {
         getLabel: () => {
           if (!isHungry(horse)) return '';
           if (inventory.get('horseFeed') > 0) {
-            return `Feed ${data.name} (🌾 ${inventory.get('horseFeed')})`;
+            return `Feed ${data.name} (${ITEM_ICONS.horseFeed} ${inventory.get('horseFeed')})`;
           }
           if (inventory.get('carrots') > 0) {
-            return `Give ${data.name} a carrot (🥕 ${inventory.get('carrots')})`;
+            return `Give ${data.name} a carrot (${ITEM_ICONS.carrots} ${inventory.get('carrots')})`;
           }
-          return `Feed ${data.name} (🌾 0)`;
+          return `Feed ${data.name} (${ITEM_ICONS.horseFeed} 0)`;
         },
         onPress: () => {
           // Feeding from the saddle is allowed - she can lean down.
@@ -429,8 +534,10 @@ function registerHorseInteractions(horse) {
           // the carrots below rather than feeding anything.
           if (inventory.spend('horseFeed', 1)) {
             feedHorse(horse);
+            sound.play('munch');
             interactions.showMessage(
-              `Yum! ${data.name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
+              `Yum! ${data.name} is happy. `
+              + `(${ITEM_ICONS.horseFeed} ${inventory.get('horseFeed')} left)`
             );
             // A full hunger bar and one fewer sack are both worth remembering.
             saveAndShow();
@@ -441,8 +548,10 @@ function registerHorseInteractions(horse) {
           // a while - about a third of the bar's worth.
           if (inventory.spend('carrots', 1)) {
             treatHorse(horse, CARROT_TREAT);
+            sound.play('munch');
             interactions.showMessage(
-              `Crunch! ${data.name} loves carrots. (🥕 ${inventory.get('carrots')} left)`
+              `Crunch! ${data.name} loves carrots. `
+              + `(${ITEM_ICONS.carrots} ${inventory.get('carrots')} left)`
             );
             saveAndShow();
             return;
@@ -494,7 +603,12 @@ const breeding = createBreeding({
   addHorse: addHorseToWorld,
   isSpotFree: (x, z, radius) => controls.isSpotFree(x, z, radius),
   onResize: updateHorseCircle,
-  announce: (text) => interactions.showMessage(text, 3),
+  announce: (text) => {
+    // The two happiest moments in the game - a foal being born, and that foal
+    // growing up - both come through here, and both get the little fanfare.
+    sound.play('foal');
+    interactions.showMessage(text, 3);
+  },
   onChange: () => save(),
 });
 
@@ -690,27 +804,27 @@ const STORE_ITEMS = [
   {
     key: 'horseFeed',
     label: 'Horse feed',
-    icon: '🌾',
+    icon: ITEM_ICONS.horseFeed,
     price: 5,
     give: () => {
       inventory.add('horseFeed', 1);
-      return `Bought horse feed! (🌾 ${inventory.get('horseFeed')})`;
+      return `Bought horse feed! (${ITEM_ICONS.horseFeed} ${inventory.get('horseFeed')})`;
     },
   },
   {
     key: 'chickenFeed',
     label: 'Chicken feed',
-    icon: '🌽',
+    icon: ITEM_ICONS.chickenFeed,
     price: 3,
     give: () => {
       inventory.add('chickenFeed', 1);
-      return `Bought chicken feed! (🌽 ${inventory.get('chickenFeed')})`;
+      return `Bought chicken feed! (${ITEM_ICONS.chickenFeed} ${inventory.get('chickenFeed')})`;
     },
   },
   {
     key: 'chick',
     label: 'Chick',
-    icon: '🐔',
+    icon: CHICKEN_ICON,
     price: 8,
     // A pen with twelve chickens in it is already a crowd.
     canBuy: () => (coop.count() < MAX_CHICKENS ? true : 'The coop is full!'),
@@ -723,7 +837,7 @@ const STORE_ITEMS = [
       if (!coop.addChicken({ chick: true })) return false;
       // Chickens are not an inventory item, so the HUD has to be told.
       hud.refresh();
-      return `A fluffy new chick! It needs time to grow. (🐔 ${coop.count()})`;
+      return `A fluffy new chick! It needs time to grow. (${CHICKEN_ICON} ${coop.count()})`;
     },
   },
   // The two packets of seed for the garden back home. They are cheap on purpose:
@@ -760,9 +874,10 @@ const shopMenu = createShopMenu({
   inventory,
   controls,
   interactions,
-  // After every purchase: redraw the row of numbers and write the ranch out,
-  // so a new sack of oats survives closing the tab a second later.
+  // After every purchase: a coin ding, redraw the row of numbers and write the
+  // ranch out, so a new sack of oats survives closing the tab a second later.
   onBuy: () => {
+    sound.play('coin');
     hud.refresh();
     saveAndShow();
   },
@@ -847,7 +962,7 @@ const MARKET_ITEMS = [
   {
     key: 'chicken',
     label: 'Chicken',
-    icon: '🐔',
+    icon: CHICKEN_ICON,
     price: CHICKEN_PRICE,
     // She must always keep at least one grown chicken, or the coop would stand
     // empty and there would be no more eggs. Chicks do not count: they are far
@@ -861,24 +976,24 @@ const MARKET_ITEMS = [
       if (!coop.removeChicken()) return false;
       // Chickens are not an inventory item, so the HUD has to be told.
       hud.refresh();
-      return `A family took a chicken home! (🐔 ${coop.count()} left)`;
+      return `A family took a chicken home! (${CHICKEN_ICON} ${coop.count()} left)`;
     },
   },
   {
     key: 'egg',
     label: '1 egg',
-    icon: '🥚',
+    icon: ITEM_ICONS.eggs,
     price: EGG_PRICE,
     canBuy: () => (inventory.get('eggs') >= 1 ? true : 'No eggs yet'),
     refused: 'No eggs yet',
     give: () => {
       if (!inventory.spend('eggs', 1)) return false;
-      return `Sold an egg! (🥚 ${inventory.get('eggs')} left)`;
+      return `Sold an egg! (${ITEM_ICONS.eggs} ${inventory.get('eggs')} left)`;
     },
   },
   {
     key: 'eggsAll',
-    icon: '🥚',
+    icon: ITEM_ICONS.eggs,
     // Both the words and the price are FUNCTIONS here, because they change
     // every time an egg is collected or sold. shop.js reads the price once,
     // before the eggs change hands, so the whole basket is paid for.
@@ -891,7 +1006,7 @@ const MARKET_ITEMS = [
       const eggs = inventory.get('eggs');
       if (eggs < 1) return false;
       if (!inventory.spend('eggs', eggs)) return false;
-      return `The baker took all ${eggs} of them! (🪙 +${eggs * EGG_PRICE})`;
+      return `The baker took all ${eggs} of them! (${ITEM_ICONS.coins} +${eggs * EGG_PRICE})`;
     },
   },
   // What the neighbours grow, plus the carrots out of her own garden. The icons
@@ -917,9 +1032,11 @@ const marketMenu = createShopMenu({
   controls,
   interactions,
   mode: 'sell',
-  // After every sale: redraw the row of numbers and write the ranch out, so a
-  // sold chicken never comes back because the tab was closed a second later.
+  // After every sale: a coin ding, redraw the row of numbers and write the
+  // ranch out, so a sold chicken never comes back because the tab was closed a
+  // second later.
   onBuy: () => {
+    sound.play('coin');
     hud.refresh();
     saveAndShow();
   },
@@ -960,8 +1077,10 @@ interactions.register({
 //   E  collect the eggs lying in the pen
 //   F  feed the chickens one handful of chicken feed
 //
-// Chicken feed is NOT horse feed: the corn is 🌽 and the oats are 🌾, and one
-// will not do for the other.
+// Chicken feed is NOT horse feed: the chickens' bowl is 🥣 and the horses' oats
+// are 🌾, and one will not do for the other. (Both pictures come from
+// ITEM_ICONS in inventory.js, which is the only place in the whole game any
+// picture is written down.)
 // ---------------------------------------------------------------------------
 interactions.register({
   object: coop.gate,
@@ -982,10 +1101,11 @@ interactions.register({
           return;
         }
         inventory.add('eggs', collected);
+        sound.play('egg');
         interactions.showMessage(
           collected === 1
-            ? 'You found an egg! (🥚 1)'
-            : `You found ${collected} eggs! (🥚 ${collected})`
+            ? `You found an egg! (${ITEM_ICONS.eggs} 1)`
+            : `You found ${collected} eggs! (${ITEM_ICONS.eggs} ${collected})`
         );
         saveAndShow();
       },
@@ -993,22 +1113,25 @@ interactions.register({
     {
       key: 'KeyF',
       getLabel: () =>
-        coop.isHungry() ? `Feed chickens (🌽 ${inventory.get('chickenFeed')})` : '',
+        coop.isHungry()
+          ? `Feed chickens (${ITEM_ICONS.chickenFeed} ${inventory.get('chickenFeed')})`
+          : '',
       onPress: () => {
         if (!coop.isHungry()) {
           interactions.showMessage("The chickens aren't hungry right now.");
           return;
         }
 
-        // One handful of corn fills the whole coop.
+        // One bowl of feed fills the whole coop.
         if (!inventory.spend('chickenFeed', 1)) {
           interactions.showMessage('No chicken feed! Buy some at the store.');
           return;
         }
 
         coop.feed();   // full bar, and every chicken does a happy little hop
+        sound.play('munch');
         interactions.showMessage(
-          `Cluck cluck! (🌽 ${inventory.get('chickenFeed')} left)`
+          `Cluck cluck! (${ITEM_ICONS.chickenFeed} ${inventory.get('chickenFeed')} left)`
         );
         saveAndShow();
       },
@@ -1079,6 +1202,7 @@ function plantInPlot(index, cropKey) {
   }
 
   garden.plantAt(index, cropKey);
+  sound.play('plant');
   interactions.showMessage(
     `You planted ${crop.name}! It will be ready soon. (${icon} ${inventory.get(crop.seedKey)} left)`
   );
@@ -1130,6 +1254,7 @@ for (const plot of garden.plots) {
 
           const crop = CROPS[picked];
           inventory.add(crop.harvestKey, crop.harvestCount);
+          sound.play('harvest');
           interactions.showMessage(
             `You picked ${crop.harvestCount} ${crop.name}! `
             + `(${ITEM_ICONS[crop.harvestKey]} ${inventory.get(crop.harvestKey)})`,
@@ -1184,8 +1309,9 @@ const tradeMenu = createTradeMenu({
   interactions,
   // After every swap: redraw the row of numbers and write the ranch out, so a
   // bundle of wool never vanishes because the tab was closed a second later.
-  // (This is the same pair of lines the store and the market stall use.)
+  // (This is the same little group of lines the store and the market stall use.)
   onTrade: () => {
+    sound.play('coin');
     hud.refresh();
     saveAndShow();
   },
@@ -1301,16 +1427,103 @@ function update(dt) {
   //    the ranch is written out and the count starts again (save() resets it).
   secondsSinceSave += dt;
   if (secondsSinceSave >= AUTOSAVE_SECONDS) save();
+
+  // 10. THE NOISES THAT KEEP GOING: footsteps while she walks, clip-clop while
+  //     she rides, and a bird somewhere in the trees now and then. sound.js
+  //     works out the rhythm; all this has to say is what her feet are doing.
+  sound.setMovement(
+    controls.isMoving() ? (riding.isRiding() ? 'ride' : 'walk') : ''
+  );
+  sound.update(dt);
+
+  // 11. A panel opening or closing gets its own soft little note. It is done by
+  //     WATCHING rather than by a call inside each panel, because a panel can
+  //     be closed four different ways (its Close button, Esc, a "start over",
+  //     or main.js opening it) and this one line catches all of them.
+  const panelsNowOpen = isPanelOpen();
+  if (panelsNowOpen !== panelsWereOpen) {
+    panelsWereOpen = panelsNowOpen;
+    sound.play(panelsNowOpen ? 'panelOpen' : 'panelClose');
+  }
 }
 
-// While this is true the loop still DRAWS but stops updating. Only the debug
-// handle below ever sets it.
-let paused = false;
+// Was one of the four panels open last frame? (See step 11 above.)
+let panelsWereOpen = false;
+
+// ===========================================================================
+// THE TITLE SCREEN, AND HOW A GAME ACTUALLY STARTS
+// ===========================================================================
+//
+// Every visit begins on the front page: the name of the game, one big button,
+// a sound switch and four little pictures showing which keys do what. The
+// ranch behind it is already built and already being drawn - it just turns
+// very slowly on the spot, and NOTHING in it moves. No horse gets hungry, no
+// seed grows, no chick grows up and the keyboard does nothing, because
+// "paused" is true and update() is simply not called.
+//
+// startGame() is the one door from the front page into the game, and it is
+// hung off window.ranch so a test can open it without hunting for a button.
+// ===========================================================================
+
+// Has the player pressed Play at least once this visit? It is what makes the
+// button say "Continue" rather than "Play" after a trip back to the title.
+let hasPlayed = false;
+
+function startGame() {
+  hasPlayed = true;
+  titleScreen.hide();
+  // The tap on Play is the gesture browsers want before any noise is allowed.
+  sound.unlock();
+  setPaused(false);
+  controls.setEnabled(true);
+  interactions.setEnabled(true);
+  // The clock has been ticking away behind the title screen. Throw that away,
+  // or the first frame of the game would arrive with a minute of hunger on it.
+  clock.getDelta();
+}
+
+const titleScreen = createTitleScreen({
+  sound,
+  // "Play" on a brand new ranch, "Continue" when there is one to come back to.
+  // It is asked afresh every time the front page appears, so walking out of a
+  // game through the pause menu and straight back in says "Continue".
+  hasSave: () => hasPlayed || loadGame() !== null,
+  onPlay: startGame,
+  // "New game" has already asked "are you sure?" by the time we hear about it.
+  // It goes through exactly the same door as the barn menu's "Start over":
+  // throw the save file away and reload the page, which builds a brand new
+  // ranch from scratch.
+  onNewGame: () => startOver(),
+});
+
+// Up it goes, before the very first frame is drawn - and the keyboard and the
+// mouse go with it, so nothing behind the front page can be poked at.
+controls.setEnabled(false);
+interactions.setEnabled(false);
+titleScreen.show();
+
+// One tick of the game, deciding which of the three things should happen:
+//
+//   the title screen is up   swing the camera slowly round the ranch, and run
+//                            not one single frame of the game itself
+//   paused (the Esc menu)    nothing at all
+//   playing                  a full frame of update()
+//
+// It is its own little function, rather than three lines inside animate(),
+// purely so that a test can tick the game exactly the way the browser does -
+// including the part where the title screen holds everything still.
+function frame(dt) {
+  if (titleScreen.isOpen()) {
+    controls.orbit(Math.min(dt, 0.1));
+    return;
+  }
+  if (paused) return;
+  update(dt);
+}
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
-  if (!paused) update(dt);
+  frame(clock.getDelta());
   renderer.render(scene, camera);
 }
 
@@ -1324,6 +1537,15 @@ function animate() {
 //   ranch.setPaused(true);          // stop the clock
 //   ranch.update(1 / 60);           // one frame, exactly
 //   ranch.inventory.get('horseFeed');
+//
+// SINCE PHASE 8 there is a title screen in front of everything, so the first
+// line of any test is now:
+//
+//   ranch.startGame();              // the same thing the big Play button does
+//
+// ...which hides the front page, hands the keyboard back and lets the ranch
+// start ticking again. (Clicking #title-play does exactly the same job, and
+// also proves the button itself works.)
 //
 // The game itself never reads any of this - take the whole block out and
 // nothing changes on screen.
@@ -1353,8 +1575,19 @@ window.ranch = {
   tradeMenu,
   renderer,
   update,
+  // frame(dt) is what the browser calls sixty times a second: it is update(dt)
+  // with the title screen and the pause menu taken into account. A test that
+  // wants to prove the ranch is really on hold ticks THIS, not update().
+  frame,
   save,
-  setPaused: (value) => { paused = !!value; },
+  setPaused,
+  // Phase 8: the front of the game.
+  sound,
+  titleScreen,
+  pauseMenu,
+  startGame,
+  isPanelOpen,
+  isPaused: () => paused,
 };
 
 animate();

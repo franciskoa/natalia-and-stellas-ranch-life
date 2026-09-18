@@ -17,7 +17,7 @@
 //
 // WHY NOT JUST REUSE createShopMenu? Because every row of a shop is priced in
 // coins: it prints "🪙 5" under the words and takes (or pays) that many coins
-// when the button is pressed. A trade has no price at all - it is "🥚 2 → 🍿 3"
+// when the button is pressed. A trade has no price at all - it is "🥚 2 → 🌽 3"
 // - so a trade row needs its own middle line, and the panel needs no "You have
 // 🪙 20" line at the top. The rest (the dark sheet, Esc, switching the game's
 // keyboard off, the little note that answers back) is the same idea, written
@@ -184,7 +184,7 @@ export function createTradeMenu({
   const greetingElement = div('shop-intro', '');
   panel.appendChild(greetingElement);
 
-  // "You have 🥚 4 · 🍿 0 · 🥛 1" - only the things this family's offers are
+  // "You have 🥚 4 · 🌽 0 · 🥛 1" - only the things this family's offers are
   // about, so it never turns into the whole pocket.
   const pocketElement = div('trade-pocket', '');
   panel.appendChild(pocketElement);
@@ -194,7 +194,7 @@ export function createTradeMenu({
   panel.appendChild(list);
 
   // --- the line that answers back -------------------------------------------
-  // "Swapped 2 eggs for 3 corn! (🍿 3)" after a trade, or "Not enough eggs"
+  // "Swapped 2 eggs for 3 corn! (🌽 3)" after a trade, or "Not enough eggs"
   // when she taps a row she cannot do. It sits between the offers and Close, so
   // it never moves anything else around when it changes.
   const noteLine = div('shop-note', '');
@@ -264,8 +264,8 @@ export function createTradeMenu({
   }
 
   // --- building one row ------------------------------------------------------
-  // [🍿]  2 eggs → 3 corn        [Trade]
-  //       🥚 2 → 🍿 3
+  // [🌽]  2 eggs → 3 corn        [Trade]
+  //       🥚 2 → 🌽 3
   //       Not enough eggs
   //
   // The big icon on the left is what she GETS, because that is the exciting
@@ -311,7 +311,7 @@ export function createTradeMenu({
   function refresh() {
     if (!farm) return;
 
-    // "You have 🥚 4 · 🍿 0"
+    // "You have 🥚 4 · 🌽 0"
     const keys = itemsInOffers(rows.map((entry) => entry.offer));
     pocketElement.textContent = keys.length
       ? 'You have ' + keys.map((key) => amountIcon(key, inventory.get(key))).join(' · ')

@@ -6,12 +6,13 @@
 //
 //   coins        the money she buys things with
 //   horseFeed    a sack of oats - one sack feeds one horse (F on a horse)
-//   chickenFeed  corn for the chickens - one handful fills the coop
+//   chickenFeed  a bowl of feed for the chickens - one fills the whole coop
 //   eggs         what the chickens lay, which she can sell later
 //
 // Horse feed and chicken feed are DIFFERENT things on purpose: you cannot feed
-// oats to the chickens, and the horses will not eat corn. That is the whole
-// reason there are two keys rather than one "feed" number.
+// oats to the chickens, and the horses will not eat what is in the chickens'
+// bowl. That is the whole reason there are two keys rather than one "feed"
+// number.
 //
 // Phase 6 adds the four things the NEIGHBOURS farm, which she gets by swapping
 // baskets with them at their farm gates (see trade.js):
@@ -181,13 +182,25 @@ export function createInventory(initial) {
 }
 
 // ---------------------------------------------------------------------------
-// THE ICONS - one emoji per thing, used by the HUD here AND by the trade panel
-// in trade.js, so a bottle of milk is the same 🥛 everywhere in the game.
+// THE ICONS - one emoji per thing. THIS TABLE IS THE ONLY PLACE ANY OF THEM IS
+// WRITTEN DOWN. The HUD here, the store and the market stall (main.js), the
+// trade panel (trade.js), the barn menu (menu.js) and the prompts at the coop
+// and the garden all read it, so a bottle of milk is the same 🥛 everywhere in
+// the game and changing a picture is a one-line job.
 //
-// 🌽 already belongs to CHICKEN FEED (it has since Phase 5, and it is written
-// into the store, the coop prompt and the messages), so the neighbours' corn
-// takes 🍿 instead - which an eight-year-old reads as "corn" just as quickly,
-// and nothing else in the game uses.
+// PHASE 8 SWAPPED TWO OF THEM ROUND. Until then corn-the-vegetable was 🍿
+// (popcorn) while 🌽 meant chicken feed, which is exactly backwards to anybody
+// looking at the pictures - and pictures are how an eight-year-old reads this
+// game. So now:
+//
+//   corn         🌽   the sweetcorn the Garcias grow and she grows herself
+//   chickenFeed  🥣   a bowl of feed. A BOWL, not a grain, because the picture
+//                     has to say "this is the animals' dinner" rather than
+//                     "this is a vegetable" - and 🥣 draws properly on Windows,
+//                     Android and iPhones alike.
+//
+// Nothing about the SAVE FILE changed: the keys are still 'corn' and
+// 'chickenFeed', so every ranch saved before Phase 8 loads exactly as it was.
 //
 // THE TWO KINDS OF SEED are the only pair in here that are not obvious from the
 // picture alone: 🌱 and 🌿 are both simply "a green thing you plant". That is on
@@ -195,14 +208,15 @@ export function createInventory(initial) {
 // the prompt at the plot - writes the WORD next to it as well ("🌱 2 corn
 // seeds", "F: Plant carrots (🌿 2)"). Nothing in the game ever asks a child to
 // tell one leaf from the other; the two pictures only have to be different from
-// each other, and from the nine icons above them.
+// each other, and from the nine icons above them - which, now that corn is 🌽
+// and the feed is 🥣, they still are.
 // ---------------------------------------------------------------------------
 export const ITEM_ICONS = {
   coins: '🪙',
   horseFeed: '🌾',
-  chickenFeed: '🌽',
+  chickenFeed: '🥣',
   eggs: '🥚',
-  corn: '🍿',
+  corn: '🌽',
   carrots: '🥕',
   milk: '🥛',
   wool: '🧶',
@@ -211,15 +225,20 @@ export const ITEM_ICONS = {
   carrotSeeds: '🌿',
 };
 
+// A chicken is not an inventory item - it is an animal standing in the pen -
+// so it has no place in ITEM_ICONS. It still needs one picture that everything
+// agrees on, though, so here it is, right beside the others.
+export const CHICKEN_ICON = '🐔';
+
 // ---------------------------------------------------------------------------
 // THE HUD - the little row of numbers in the top-left corner.
 //
 // It is plain HTML, not 3D, and it is deliberately tiny and quiet, like the
 // controls hint in the other corner:
 //
-//   🪙 20 · 🌾 3 · 🌽 5 · 🥚 0 · 🐔 4
+//   🪙 20 · 🌾 3 · 🥣 5 · 🥚 0 · 🐔 4
 //   coins · horse feed · chicken feed · eggs · chickens
-//   🍿 3 corn · 🥛 1 milk
+//   🌽 3 corn · 🥛 1 milk
 //
 // The little legend under the first line (and the hover text) is there because
 // an eight-year-old should not have to guess what 🌾 means.
@@ -281,7 +300,7 @@ export function createHud(inventory, getChickenCount) {
     // The chickens are not an inventory item - they are animals standing in
     // the pen - so their number is asked for separately.
     const chickens = typeof getChickenCount === 'function' ? getChickenCount() : 0;
-    parts.push(`🐔 ${chickens}`);
+    parts.push(`${CHICKEN_ICON} ${chickens}`);
 
     if (itemsElement) itemsElement.textContent = parts.join(' · ');
 
