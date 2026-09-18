@@ -91,8 +91,9 @@
     #prompt {
       position: fixed;
       left: 50%;
-      /* Clear of the short six-line hint box in the bottom-left corner. */
-      bottom: 126px;
+      /* Clear of the short seven-line hint box in the bottom-left corner
+         (seven lines plus its padding come to about 140px tall). */
+      bottom: 152px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -116,12 +117,69 @@
       color: #ffe082;
     }
 
+    /* THE COMPASS: a small round badge at the very top of the screen with an
+       arrow in it, and one word underneath saying where the arrow is pointing.
+       js/road.js turns the arrow every frame - it points at the store while
+       she is nearer home, and back home once she is nearer the store - and
+       sets data-target to "store" or "home", which is what swaps the word.
+
+       The badge is the outer box (it never turns); #compass inside it is the
+       only thing road.js rotates, so the word underneath always stays the
+       right way up. */
+    #compass-badge {
+      position: fixed;
+      left: 50%;
+      top: 10px;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: "Segoe UI", Arial, sans-serif;
+      pointer-events: none;          /* clicks pass through to the game */
+      user-select: none;
+      z-index: 4;
+    }
+
+    #compass {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(20, 24, 30, 0.55);
+      color: #ffe082;                /* the same warm yellow as the key hints */
+      font-size: 17px;
+      line-height: 34px;             /* centres the arrow in the circle */
+      text-align: center;
+      /* road.js replaces this every frame with the angle to point at. */
+      transform: rotate(0deg);
+    }
+
+    #compass-label {
+      margin-top: 2px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #e8ecf2;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      white-space: nowrap;
+    }
+
+    /* The word under the badge. It is written in CSS rather than in JavaScript
+       so that road.js only ever has to set one attribute. */
+    #compass-label::after {
+      content: "Store";
+    }
+
+    #compass[data-target="home"] + #compass-label::after {
+      content: "Home";
+    }
+
     /* The little feedback message, e.g. "Yum! Biscuit is happy."
-       Same idea as the prompt, but up at the top and in a warm colour. */
+       Same idea as the prompt, but up at the top and in a warm colour.
+       It sits at 84px rather than 40px so it clears the compass badge above
+       it, which is 34px of circle plus its word. */
     #message {
       position: fixed;
       left: 50%;
-      top: 40px;
+      top: 84px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -163,18 +221,22 @@
     }
 
     /* -----------------------------------------------------------------
-       THE BARN MENU
+       THE BARN MENU (and the store panel, which borrows its look)
        The panel that opens when the player presses E at the barn door:
        pick a horse, then tap a colour for its saddle and its blanket.
        js/menu.js builds all the buttons inside it and adds the "visible"
        class to show it. Everything here is big and round on purpose -
        it has to be easy for an eight-year-old to read and to tap.
+
+       These are CLASSES, not ids, because js/shop.js builds a second panel
+       (the store) out of the same pieces. Everything a shop panel adds of
+       its own is further down, under "THE STORE PANEL".
        ----------------------------------------------------------------- */
 
     /* The dark sheet over the whole screen. Hidden until menu.js shows it;
        "visibility: hidden" (not just see-through) means no stray clicks can
        land on the buttons while it is away. */
-    #barn-menu {
+    .barn-menu {
       position: fixed;
       left: 0;
       top: 0;
@@ -195,7 +257,7 @@
       transition: opacity 0.15s ease;
     }
 
-    #barn-menu.visible {
+    .barn-menu.visible {
       opacity: 1;
       visibility: visible;
     }
@@ -395,6 +457,141 @@
       background: #dfe4ea;
     }
 
+    /* -----------------------------------------------------------------
+       THE STORE PANEL
+       The panel that opens when the player presses E at the store door at
+       the end of the road. js/shop.js builds it out of the barn menu's
+       pieces above (.barn-menu, .barn-panel, .barn-title, .barn-close) so
+       the two panels match; everything below is just the rows of goods.
+
+       The same rows are what the market stall will use to SELL things, so
+       nothing here says "buy" anywhere.
+       ----------------------------------------------------------------- */
+
+    /* "You have 🪙 20" - the first thing anybody looks at in a shop. */
+    .shop-coins {
+      margin: -8px 0 14px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffe082;
+    }
+
+    /* An optional line of friendly words under that. */
+    .shop-intro {
+      margin: -8px 0 14px;
+      font-size: 14px;
+      color: #dbe4ee;
+    }
+
+    /* The goods, one per line, stacked down the panel. */
+    .shop-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    /* One row: a big icon, the name and price, then the button. */
+    .shop-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.18);
+      text-align: left;
+    }
+
+    /* The rows she cannot use right now fade back a little. */
+    .shop-item-off {
+      opacity: 0.6;
+    }
+
+    .shop-item-icon {
+      width: 40px;
+      font-size: 30px;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .shop-item-text {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .shop-item-label {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .shop-item-price {
+      font-size: 15px;
+      color: #ffe082;
+    }
+
+    /* "Not enough coins" / "The coop is full!" under the price. Empty (and so
+       invisible) whenever the row is usable. */
+    .shop-item-why {
+      font-size: 13px;
+      font-weight: 600;
+      color: #ff9e80;
+    }
+
+    /* The big green Buy button. Grass green, so it reads as "yes, go on". */
+    .shop-buy {
+      min-width: 96px;
+      min-height: 48px;
+      padding: 10px 18px;
+      font: inherit;
+      font-size: 18px;
+      font-weight: 700;
+      color: #23282f;
+      background: #8bc34a;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+
+    /* Can't afford it (or there is no room for it): a dull grey button that
+       does not respond to a tap. */
+    .shop-buy:disabled {
+      color: #99a2ae;
+      background: #5b6472;
+      cursor: default;
+    }
+
+    /* The line that answers back: "Bought horse feed! (🌾 4)". It keeps its
+       height even when it is empty, so nothing jumps about when it changes. */
+    .shop-note {
+      min-height: 24px;
+      margin-bottom: 12px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .shop-note-good {
+      color: #b9f6ca;                  /* a happy green */
+    }
+
+    .shop-note-bad {
+      color: #ff9e80;                  /* a gentle "no", never a harsh red */
+    }
+
+    /* On a phone the button drops under the words rather than squeezing the
+       name of the thing into nothing. */
+    @media (max-width: 700px) {
+      .shop-buy {
+        min-width: 76px;
+        font-size: 16px;
+      }
+
+      .shop-item-icon {
+        font-size: 24px;
+        width: 32px;
+      }
+    }
+
     /* The little "Saved" note that blinks in the top-right corner after the
        player changes something. It fades itself out after a second and never
        takes a click, so it cannot get in the way of the game. */
@@ -458,14 +655,23 @@
     <div id="hud-legend">coins · horse feed · chicken feed · eggs · chickens</div>
   </div>
 
-  <!-- On-screen controls hint: six short lines, tucked in the corner. -->
+  <!-- On-screen controls hint: seven short lines, tucked in the corner. -->
   <div id="hint">
     <b>Move:</b> W A S D / arrows<br>
     <b>Look:</b> drag mouse<br>
     <b>E:</b> ride / get off / collect eggs<br>
     <b>F:</b> feed<br>
     <b>Barn:</b> press E at the barn door<br>
-    <b>Coop:</b> press E at the chicken gate
+    <b>Coop:</b> press E at the chicken gate<br>
+    <b>Store:</b> follow the road signs (E to shop)
+  </div>
+
+  <!-- The compass badge at the top of the screen. js/road.js turns the arrow
+       and sets data-target, and the CSS above turns that into the word
+       underneath ("Store" on the way out, "Home" on the way back). -->
+  <div id="compass-badge">
+    <div id="compass" data-target="store">▲</div>
+    <div id="compass-label"></div>
   </div>
 
   <!-- "Press E to ..." appears here when Natalia is close to something. -->

@@ -53,7 +53,10 @@ function box(w, h, d, x, y, z, material) {
 // ---------------------------------------------------------------------------
 function buildGround(scene) {
   // A plane is created standing up, so we tip it flat with a -90 degree turn.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), M.grass);
+  // It is 1600 x 1600 units: far bigger than the ranch, because Phase 5 runs a
+  // road out east to the feed store. One big flat plane costs the graphics card
+  // almost nothing (it is two triangles), so making it huge is cheap.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), M.grass);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = 0;
   ground.name = 'ground';
@@ -183,7 +186,7 @@ const trunkGeo = new THREE.CylinderGeometry(0.28, 0.38, 2.6, 6);
 const coneGeo = new THREE.ConeGeometry(1.9, 4.2, 7);
 const blobGeo = new THREE.SphereGeometry(1.8, 7, 5);
 
-function buildTree(x, z, round, scale) {
+export function buildTree(x, z, round, scale) {
   const tree = new THREE.Group();
 
   const trunk = new THREE.Mesh(trunkGeo, M.trunk);
@@ -259,9 +262,13 @@ export function buildWorld(scene) {
   scene.add(buildTrees());
   scene.add(buildProps());
 
-  // How far the player is allowed to wander. The next agent can clamp
-  // the player position to these numbers so she never walks off the ground.
-  const bounds = { minX: -60, maxX: 60, minZ: -60, maxZ: 60 };
+  // How far the player is allowed to wander. controls.js clamps every step to
+  // these numbers so she never walks off the edge of the ground.
+  //
+  // Phase 5 stretched this a long way out to the north-east, because the road
+  // to the feed store runs that way: the store itself stands at about
+  // (336, 383), and the whole road corridor has to sit comfortably inside.
+  const bounds = { minX: -120, maxX: 700, minZ: -120, maxZ: 700 };
 
   return { ground, house, barn, bounds };
 }

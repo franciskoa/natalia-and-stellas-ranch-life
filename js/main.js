@@ -14,18 +14,24 @@
 // Phase 5 (this slice): a pocket with coins and two different kinds of feed,
 // shown as a little row of numbers in the top-left corner, and a chicken coop
 // beside the house - four chickens pottering about a fenced pen, a shared
-// hunger bar over the hen house, and eggs to collect.
+// hunger bar over the hen house, and eggs to collect. Plus a scenic road
+// leading out of the ranch gate - trees, a pond, a bridge, cows and signposts -
+// to a feed store about fifty seconds' gallop away, where coins buy horse feed,
+// chicken feed and a new chick. A little compass at the top of the screen
+// always points at whichever of the two places she is not standing in.
 
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
+import { buildRoad, updateCompass } from './road.js';
 import { makeNatalia, makeStella, updateFollower } from './characters.js';
 import { createControls } from './controls.js';
 import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
 import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
 import { createBarnMenu } from './menu.js';
+import { createShopMenu } from './shop.js';
 import { createInventory, createHud } from './inventory.js';
-import { createCoop } from './chickens.js';
+import { createCoop, MAX_CHICKENS } from './chickens.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
@@ -117,6 +123,17 @@ scene.add(sunLight);
 const world = buildWorld(scene);
 
 // ---------------------------------------------------------------------------
+// The road out of the ranch, everything you see along it, and the feed store
+// at the far end of it. road.js builds the lot and hands back the few things
+// the rest of the game needs to know about: where the shop is, the rectangle
+// nobody may walk through, and the spot in front of its door.
+// ---------------------------------------------------------------------------
+const road = buildRoad(scene);
+
+// Where "home" is, for the compass: the patch of yard the game starts on.
+const RANCH_POSITION = { x: 0, z: 8 };
+
+// ---------------------------------------------------------------------------
 // The horses. One per entry in STARTING_HORSES above; the game loop and the
 // interaction code below just walk the list, so adding a fourth horse is a
 // matter of adding a fourth line to that array.
@@ -177,6 +194,12 @@ for (const h of horses) {
 // The chicken pen is a rectangle nobody may walk into - not Natalia, and not a
 // horse she is riding. She talks to the chickens over the gate.
 controls.addBlockBox(coop.penBox);
+
+// The store at the end of the road is solid too, so nobody rides in through
+// the shop window. This goes in BEFORE the save file is loaded further down,
+// because loading uses the same list to shove Natalia out of anything she
+// would have been standing inside.
+controls.addBlockBox(road.storeBox);
 
 // ---------------------------------------------------------------------------
 // Natalia's pocket: her coins, her two kinds of feed and her eggs. It starts
@@ -433,6 +456,100 @@ interactions.register({
 });
 
 // ---------------------------------------------------------------------------
+// THE STORE, at the far end of the road.
+//
+// shop.js builds the panel; all main.js has to say is what is for sale. Each
+// line below is one row in the shop: an icon, a name, a price in coins, and a
+// give() that hands the goods over and writes the little confirmation line.
+//
+// give() is called BEFORE the coins are taken, and returning false from it
+// means "that did not work after all" - which is how buying a chick for a full
+// coop costs nothing. (The Chick button greys itself out in that case anyway,
+// through canBuy; the false is the belt to canBuy's braces.)
+// ---------------------------------------------------------------------------
+const STORE_ITEMS = [
+  {
+    key: 'horseFeed',
+    label: 'Horse feed',
+    icon: '🌾',
+    price: 5,
+    give: () => {
+      inventory.add('horseFeed', 1);
+      return `Bought horse feed! (🌾 ${inventory.get('horseFeed')})`;
+    },
+  },
+  {
+    key: 'chickenFeed',
+    label: 'Chicken feed',
+    icon: '🌽',
+    price: 3,
+    give: () => {
+      inventory.add('chickenFeed', 1);
+      return `Bought chicken feed! (🌽 ${inventory.get('chickenFeed')})`;
+    },
+  },
+  {
+    key: 'chick',
+    label: 'Chick',
+    icon: '🐔',
+    price: 8,
+    // A pen with twelve chickens in it is already a crowd.
+    canBuy: () => (coop.count() < MAX_CHICKENS ? true : 'The coop is full!'),
+    refused: 'The coop is full!',
+    give: () => {
+      // addChicken hands back null when there is no room, and then nothing is
+      // charged (see the note above).
+      if (!coop.addChicken()) return false;
+      // Chickens are not an inventory item, so the HUD has to be told.
+      hud.refresh();
+      return `A new chick! (🐔 ${coop.count()})`;
+    },
+  },
+];
+
+const shopMenu = createShopMenu({
+  title: 'The Feed Store',
+  intro: 'Everything a ranch needs.',
+  items: STORE_ITEMS,
+  inventory,
+  controls,
+  interactions,
+  // After every purchase: redraw the row of numbers and write the ranch out,
+  // so a new sack of oats survives closing the tab a second later.
+  onBuy: () => {
+    hud.refresh();
+    saveAndShow();
+  },
+});
+
+// The spot in front of the shop door. road.js made it for us; it is an empty
+// object with nothing to draw, exactly like the barn door marker above.
+//
+// A radius of 4 gives her a comfortable patch of the road end to stand on:
+// the shop's own walls stop her at z = 378.15, which is 1.65 units from the
+// marker, and the hitching rail is far enough away that hopping off a horse
+// still leaves her inside this circle.
+interactions.register({
+  object: road.storeAnchor,
+  radius: 4,
+  actions: [
+    {
+      key: 'KeyE',
+      // Same rule as the barn: you cannot ride a horse into a shop. While she
+      // is in the saddle the horse itself is the nearest thing anyway, so what
+      // she actually sees is "E: Get off" - she hops down and then presses E
+      // again at the door.
+      getLabel: () =>
+        riding.isRiding() ? 'Get off your horse first' : 'Shop at the store',
+      onPress: () => {
+        if (riding.isRiding()) return;   // the label already said why
+        shopMenu.open();
+      },
+    },
+  ],
+});
+
+// ---------------------------------------------------------------------------
 // The chicken coop. The spot we measure from is the pen gate at (-8, 0, 2) -
 // the middle of the east fence, facing the yard. The pen itself is a no-go
 // rectangle, so Natalia always stands just outside it; a radius of 3.5 gives
@@ -552,10 +669,16 @@ function update(dt) {
   // 6. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
   //    E and F. While the barn menu is open this does nothing.
   interactions.update(dt);
-  // 7. The barn menu gets its frame too. It has nothing to animate today, but
-  //    calling it means this loop never has to change if that alters.
+  // 7. The two panels get their frame too. Neither has anything to animate
+  //    today, but calling them means this loop never has to change if that
+  //    alters.
   barnMenu.update(dt);
-  // 8. The quiet autosave. dt piles up until five seconds have gone by, then
+  shopMenu.update(dt);
+  // 8. Turn the little compass arrow at the top of the screen. While she is
+  //    riding, Natalia is a child of the horse, and updateCompass reads her
+  //    WORLD position, so it points the right way either way.
+  updateCompass(natalia, camera, RANCH_POSITION, road.storePos);
+  // 9. The quiet autosave. dt piles up until five seconds have gone by, then
   //    the ranch is written out and the count starts again (save() resets it).
   secondsSinceSave += dt;
   if (secondsSinceSave >= AUTOSAVE_SECONDS) save();
@@ -598,6 +721,10 @@ window.ranch = {
   controls,
   interactions,
   riding,
+  road,
+  barnMenu,
+  shopMenu,
+  renderer,
   update,
   save,
   setPaused: (value) => { paused = !!value; },

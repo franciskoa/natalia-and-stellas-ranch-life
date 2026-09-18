@@ -66,7 +66,10 @@ const BAR_HEIGHT = 2.35;
 
 // The chickens themselves.
 const START_CHICKENS = 4;
-const MAX_CHICKENS = 12;        // the pen would be a crowd beyond this
+// Exported because the store sells chicks: its "Chick" button greys itself out
+// (rather than taking coins for a chicken that has nowhere to stand) once the
+// pen is this full.
+export const MAX_CHICKENS = 12; // the pen would be a crowd beyond this
 const CHICKEN_SPEED = 0.8;      // units a second: a gentle potter
 const CHICKEN_TURN_SPEED = 6;   // how fast one swivels to face where it is off to
 const WAIT_MIN = 1;             // seconds of standing still between walks
