@@ -229,6 +229,192 @@ export function makeStella() {
 }
 
 // ---------------------------------------------------------------------------
+// makePerson - a grown-up neighbour (Phase 6).
+//
+// It is built out of exactly the same parts as the girls above - the same
+// capsule/ball/tube/box/limb helpers, the same "origin between the feet, facing
+// +Z" rule - but dressed as a farmer instead of in a dress: trousers, a shirt,
+// maybe an apron or a pair of overalls, and a hat that is either a wide sun hat
+// or a flat cap. Nothing about makeGirl was changed to make room for it, so
+// Natalia and Stella look exactly as they did before.
+//
+// Everything you can pass in:
+//   height     how tall, in units (about 1.75 for a grown-up)
+//   shirt      the top's colour
+//   trousers   the legs' colour
+//   apron      optional: a panel of cloth across the front, in this colour
+//   overalls   optional: a bib on the chest, in the trousers' colour
+//   hair       hair colour
+//   hat        hat colour (leave it out for no hat)
+//   hatStyle   'sun' for a wide brim (the default) or 'cap' for a flat cap
+//   skin       skin colour
+//   name       just for the group's name, so it is easy to spot in the scene
+//
+// The group it hands back has one extra thing on it:
+//
+//   person.userData.update(dt, playerWorldPosition)
+//
+// Call it once a frame. The neighbour sways gently on the spot all the time,
+// and lifts a hand and waves once the player comes within WAVE_DISTANCE units.
+// playerWorldPosition is optional - leave it out and they just sway.
+// ---------------------------------------------------------------------------
+
+// How close the player has to be before a neighbour starts waving.
+const WAVE_DISTANCE = 6;
+
+// A scratch vector, made once and reused, for "where is this neighbour really?"
+const personWorldPosition = new THREE.Vector3();
+
+// The body below is built 1.75 units tall and then scaled to the height asked
+// for, the same trick makeGirl uses with its 1.6.
+const PERSON_MODEL_HEIGHT = 1.75;
+
+export function makePerson(look = {}) {
+  const skin = look.skin ?? SKIN;
+  const shirt = look.shirt ?? 0x8d6e63;
+  const trousers = look.trousers ?? 0x455a64;
+  const hairColor = look.hair ?? 0x3e2723;
+
+  const group = new THREE.Group();
+  group.name = look.name ? `person-${look.name}` : 'person';
+
+  // As with the girls: everything hangs off "root", so the idle sway can lean
+  // and lift the body without moving the group off the grass.
+  const root = new THREE.Group();
+  group.add(root);
+
+  // Legs in trousers, with a boot on the bottom of each.
+  const legL = limb(-0.135, 0.88, 0.095, 0.55, trousers);
+  const legR = limb(0.135, 0.88, 0.095, 0.55, trousers);
+  for (const leg of [legL, legR]) {
+    const boot = box(0.22, 0.15, 0.3, BOOT);
+    boot.position.set(0, -0.8, 0.03);
+    leg.add(boot);
+    root.add(leg);
+  }
+
+  // The top: a cylinder a little wider at the waist than at the shoulders.
+  const body = tube(0.21, 0.25, 0.58, shirt);
+  body.position.y = 1.17;
+  root.add(body);
+
+  // An apron (a cook's or a shopkeeper's) or a pair of overall dungarees. Both
+  // are one flat panel on the front - that is all it takes to read at a glance.
+  if (look.apron) {
+    const apron = box(0.36, 0.52, 0.08, look.apron);
+    apron.position.set(0, 1.05, 0.2);
+    root.add(apron);
+  } else if (look.overalls) {
+    const bib = box(0.3, 0.34, 0.07, trousers);
+    bib.position.set(0, 1.3, 0.21);
+    root.add(bib);
+  }
+
+  // Arms, in the shirt's colour, with a hand on the end of each.
+  const armL = limb(-0.26, 1.4, 0.068, 0.36, shirt);
+  const armR = limb(0.26, 1.4, 0.068, 0.36, shirt);
+  for (const arm of [armL, armR]) {
+    const hand = ball(0.072, skin);
+    hand.position.y = -0.52;
+    arm.add(hand);
+    root.add(arm);
+  }
+
+  // Neck and head.
+  const neck = tube(0.07, 0.07, 0.12, skin);
+  neck.position.y = 1.5;
+  root.add(neck);
+
+  const head = ball(0.155, skin);
+  head.position.y = 1.6;
+  root.add(head);
+
+  // Two eyes on the +Z side, which is the way this person faces.
+  for (const ex of [-0.057, 0.057]) {
+    const eye = ball(0.022, EYE);
+    eye.position.set(ex, 1.63, 0.142);
+    root.add(eye);
+  }
+
+  // Hair: the same half-sphere cap the girls wear, plus a little at the back.
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(0.17, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
+    mat(hairColor)
+  );
+  hair.position.y = 1.6;
+  root.add(hair);
+
+  const backHair = box(0.27, 0.22, 0.11, hairColor);
+  backHair.position.set(0, 1.53, -0.11);
+  root.add(backHair);
+
+  if (look.hat) {
+    if (look.hatStyle === 'cap') {
+      // A flat cap: a short round crown with a peak sticking out over the eyes.
+      const crown = tube(0.165, 0.185, 0.13, look.hat);
+      crown.position.y = 1.75;
+      root.add(crown);
+      const peak = box(0.3, 0.05, 0.22, look.hat);
+      peak.position.set(0, 1.71, 0.17);
+      root.add(peak);
+    } else {
+      // A wide sun hat, like Natalia's but bigger.
+      const brim = tube(0.36, 0.36, 0.045, look.hat);
+      brim.position.y = 1.72;
+      root.add(brim);
+      const crown = tube(0.16, 0.19, 0.18, look.hat);
+      crown.position.y = 1.83;
+      root.add(crown);
+    }
+  }
+
+  group.scale.setScalar((look.height ?? PERSON_MODEL_HEIGHT) / PERSON_MODEL_HEIGHT);
+
+  // -------------------------------------------------------------------------
+  // Standing-about animation.
+  //
+  //   "clock" just counts seconds, to drive the sine waves.
+  //   "wave" eases between 0 (arm down) and 1 (arm up, waving), so the hand
+  //   rises and falls smoothly instead of snapping up the moment the player
+  //   crosses an invisible line.
+  // -------------------------------------------------------------------------
+  let clock = Math.random() * 6;   // start each neighbour out of step with the others
+  let wave = 0;
+
+  function update(dt, playerWorldPosition) {
+    const step = Math.min(dt ?? 0, 0.1);
+    clock += step;
+
+    // The gentle sway: a small lean side to side and an even smaller bob.
+    root.rotation.z = Math.sin(clock * 1.1) * 0.025;
+    root.position.y = Math.sin(clock * 1.6) * 0.012;
+
+    // Is the player close enough to wave at?
+    let near = false;
+    if (playerWorldPosition) {
+      group.getWorldPosition(personWorldPosition);
+      const gap = Math.hypot(
+        playerWorldPosition.x - personWorldPosition.x,
+        playerWorldPosition.z - personWorldPosition.z
+      );
+      near = gap < WAVE_DISTANCE;
+    }
+    wave += ((near ? 1 : 0) - wave) * Math.min(1, step * 4);
+
+    // The +X arm lifts out sideways and swings to and fro: a wave. Turning a
+    // limb around Z swings it out to the side, the same way turning it around
+    // X swings it forwards in the walk cycle.
+    armR.rotation.z = wave * (2.0 + Math.sin(clock * 7) * 0.35);
+    armR.rotation.x = -0.08 * (1 - wave);
+    // The other arm just drifts a little, so nobody stands like a statue.
+    armL.rotation.x = Math.sin(clock * 1.1) * 0.07;
+  }
+
+  group.userData = { kind: 'person', name: look.name ?? '', update };
+  return group;
+}
+
+// ---------------------------------------------------------------------------
 // Follower behaviour - Stella walking a couple of steps behind Natalia.
 // ---------------------------------------------------------------------------
 // Her spot is behind the leader AND off to one side. The sideways part matters:

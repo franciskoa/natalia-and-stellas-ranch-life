@@ -30,6 +30,7 @@ import * as THREE from 'three';
 import { buildWorld } from './world.js';
 import { buildRoad, updateCompass } from './road.js';
 import { buildMarketStall } from './market.js';
+import { buildNeighbors, PERSON_BLOCK_RADIUS, TALK_RADIUS } from './neighbors.js';
 import { makeNatalia, makeStella, updateFollower } from './characters.js';
 import { createControls } from './controls.js';
 import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
@@ -145,6 +146,18 @@ const road = buildRoad(scene);
 // ---------------------------------------------------------------------------
 const market = buildMarketStall({ scene });
 
+// ---------------------------------------------------------------------------
+// Phase 6: the four neighbour farms. neighbors.js builds a whole little
+// community - the Garcias' corn, the Millers' cows, the Nguyens' sheep and the
+// Okafors' apples - each with its own house, barn, scenery, lane off the main
+// road and a signpost at the junction with a picture of what they farm on top.
+//
+// It hands back a plain "farms" list; everything main.js does with it (no-go
+// boxes, the neighbours themselves, the E prompt) is driven by that list, so
+// adding a fifth family never means touching this file again.
+// ---------------------------------------------------------------------------
+const neighbors = buildNeighbors(scene);
+
 // Where "home" is, for the compass: the patch of yard the game starts on.
 const RANCH_POSITION = { x: 0, z: 8 };
 
@@ -220,6 +233,15 @@ controls.addBlockBox(road.storeBox);
 // which leaves the road corridor (x -2.5..2.5) completely clear - so no matter
 // how the stall is drawn, it can never get in the way of the ride to the store.
 controls.addBlockBox(market.box);
+
+// Every neighbour farm's house, barn and paddock is solid, and each neighbour
+// is a round thing you walk around rather than through. Like the store above,
+// this happens BEFORE the save file is loaded, so a saved position that is now
+// inside somebody's new barn gets shoved back out onto the grass.
+for (const farm of neighbors.farms) {
+  for (const farmBox of farm.blockBoxes) controls.addBlockBox(farmBox);
+  controls.addObstacle(farm.person, PERSON_BLOCK_RADIUS);
+}
 
 // ---------------------------------------------------------------------------
 // Natalia's pocket: her coins, her two kinds of feed and her eggs. It starts
@@ -751,6 +773,50 @@ interactions.register({
   ],
 });
 
+// ===========================================================================
+// THE NEIGHBOURS - PLACEHOLDER "TALK TO" ACTION
+// ===========================================================================
+//
+// >>> TRADING GOES HERE. <<<
+//
+// This one block is the whole of what pressing E at a neighbour does today:
+// they say hello. The next slice of Phase 6 (trading eggs for corn and so on)
+// replaces the onPress below with "open the trade panel for this farm", and
+// nothing else in this file has to change - the loop is driven by
+// neighbors.farms, and every farm entry already carries everything a trade
+// panel needs:
+//
+//   farm.id         'corn' | 'dairy' | 'sheep' | 'apple'
+//   farm.name       'Mrs. Garcia'          (what the prompt says)
+//   farm.family     'The Garcia farm'      (a panel title)
+//   farm.specialty  'corn' | 'milk' | 'wool' | 'apples'
+//   farm.colors     the family's palette, incl. colors.family
+//   farm.person     the neighbour themself (what we measure distances to)
+//   farm.anchor     a "stand here" spot in the yard
+//   farm.position   { x, z } of the farmyard
+//
+// Talking is on foot only, the same rule as the barn, the store and the market
+// stall: you cannot lean down out of the saddle to swap a basket of eggs.
+// ===========================================================================
+for (const farm of neighbors.farms) {
+  interactions.register({
+    object: farm.person,
+    radius: TALK_RADIUS,
+    actions: [
+      {
+        key: 'KeyE',
+        getLabel: () =>
+          riding.isRiding() ? 'Get off your horse first' : `Talk to ${farm.name}`,
+        onPress: () => {
+          if (riding.isRiding()) return;   // the label already said why
+          // PLACEHOLDER: the trade panel replaces this line.
+          interactions.showMessage('Hello, Natalia! Come back soon to trade.', 2.5);
+        },
+      },
+    ],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Keep the picture the right shape when the window is resized.
 // ---------------------------------------------------------------------------
@@ -765,6 +831,11 @@ window.addEventListener('resize', () => {
 // frame, so movement speeds stay the same on fast and slow computers.
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
+
+// Where Natalia really is, worked out fresh each frame. While she is riding she
+// is a child of the horse, so her own position is a seat on its back - the
+// neighbours need her WORLD position to know when to wave.
+const nataliaWorld = new THREE.Vector3();
 
 // How often the quiet background autosave runs, in seconds. Everything the
 // player does on purpose saves at once anyway; this one is for the things that
@@ -802,6 +873,15 @@ function update(dt) {
   // we tell it. (The store and the market stall tell it themselves; this is
   // the safety net for anything else that changes the flock.)
   if (coop.count() !== chickensBefore) hud.refresh();
+
+  // 5b. The neighbour farms. Each neighbour sways gently on the spot and lifts
+  //     a hand to wave once Natalia is within six units, and the cows and sheep
+  //     bob their heads in their paddocks.
+  natalia.getWorldPosition(nataliaWorld);
+  for (const farm of neighbors.farms) {
+    farm.person.userData.update(dt, nataliaWorld);
+    farm.updateAnimals(dt);
+  }
 
   // 6. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
   //    E and F. While the barn menu is open this does nothing.
@@ -861,6 +941,7 @@ window.ranch = {
   riding,
   road,
   market,
+  neighbors,
   barnMenu,
   shopMenu,
   marketMenu,

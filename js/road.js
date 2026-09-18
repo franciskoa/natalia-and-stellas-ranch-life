@@ -147,7 +147,10 @@ M.shopTrimLit = litVersion(COLORS.shopTrim);
 // SCALES to the length it needs, which means one geometry covers every slab.
 // ---------------------------------------------------------------------------
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
-const jointGeo = new THREE.CylinderGeometry(ROAD_WIDTH / 2, ROAD_WIDTH / 2, 0.04, 8);
+// A unit-wide round patch (radius 0.5). Every corner patch SCALES it to the
+// width of the road it belongs to, so the main road and the narrower farm
+// lanes in neighbors.js can share this one shape.
+const jointGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.04, 8);
 const postGeo = new THREE.CylinderGeometry(0.13, 0.15, 2.3, 6);   // signpost posts
 const fencePostGeo = new THREE.BoxGeometry(0.22, 1.3, 0.22);      // fence posts
 const arrowTipGeo = new THREE.ConeGeometry(0.42, 0.9, 4);         // signpost arrow point
@@ -227,7 +230,11 @@ function sampleRoad(points, distance) {
 // DRAWING THE ROAD - one flat slab per straight stretch, plus a round patch at
 // every corner so the joins look rounded instead of showing a notch.
 // ---------------------------------------------------------------------------
-function buildRoadSurface(points) {
+// It is exported because Phase 6 paves the little lanes out to the neighbour
+// farms with exactly the same slabs, only narrower: buildRoadSurface(lane, 3.5).
+// "y" is how high above the grass the surface is painted - a lane sits a hair
+// higher than the main road so the two never flicker where they meet.
+export function buildRoadSurface(points, width = ROAD_WIDTH, y = ROAD_Y) {
   const group = new THREE.Group();
   group.name = 'roadSurface';
 
@@ -241,8 +248,8 @@ function buildRoadSurface(points) {
     // The slab is a unit box stretched to the length of this stretch, made
     // paper-thin, and as wide as the road.
     const slab = new THREE.Mesh(unitBox, M.road);
-    slab.scale.set(length, 0.05, ROAD_WIDTH);
-    slab.position.set(a.x + dx / 2, ROAD_Y, a.z + dz / 2);
+    slab.scale.set(length, 0.05, width);
+    slab.position.set(a.x + dx / 2, y, a.z + dz / 2);
     // Turn it so its long side (its local X) lies along the stretch. A box's
     // +X points at (cos, 0, -sin) once it has been turned by rotation.y, so
     // the angle we want is atan2(-dz, dx).
@@ -254,7 +261,8 @@ function buildRoadSurface(points) {
   // wedge the straight slabs leave on the outside of a bend.
   for (const point of points) {
     const patch = new THREE.Mesh(jointGeo, M.road);
-    patch.position.set(point.x, ROAD_Y, point.z);
+    patch.scale.set(width, 1, width);   // the shared patch is 1 unit across
+    patch.position.set(point.x, y, point.z);
     group.add(patch);
   }
 
@@ -268,7 +276,11 @@ function buildRoadSurface(points) {
 // "angle" is the compass direction the arrow should point, as the usual
 // atan2(dx, dz) of the way the road goes next.
 // ---------------------------------------------------------------------------
-function buildSignpost(x, z, angle) {
+// It is exported because Phase 6 stands one of these at every farm lane
+// junction. Those get the family's own colour on the board and on the arrow
+// tip, which is what the two optional material arguments are for - leave them
+// out and you get the ordinary pale road sign.
+export function buildSignpost(x, z, angle, boardMaterial = M.arrow, tipMaterial = M.arrowTip) {
   const sign = new THREE.Group();
   sign.name = 'signpost';
 
@@ -278,9 +290,9 @@ function buildSignpost(x, z, angle) {
 
   // The board: a flat plank lying along the group's +Z, with the cone stuck on
   // the far end of it. Turning the whole group then aims the whole arrow.
-  sign.add(box(0.18, 0.5, 2.0, 0, 2.1, 0.7, M.arrow));
+  sign.add(box(0.18, 0.5, 2.0, 0, 2.1, 0.7, boardMaterial));
 
-  const tip = new THREE.Mesh(arrowTipGeo, M.arrowTip);
+  const tip = new THREE.Mesh(arrowTipGeo, tipMaterial);
   tip.position.set(0, 2.1, 1.95);
   // A cone points up its own +Y, so tipping it a quarter turn forward makes it
   // point along +Z instead - the same way the board is lying.
@@ -297,14 +309,18 @@ function buildSignpost(x, z, angle) {
 // copy of the one in world.js, kept here so the store's fences can share this
 // file's materials.
 // ---------------------------------------------------------------------------
-function buildFenceRun(x1, z1, x2, z2) {
+// It is exported because the neighbour farms in Phase 6 fence their yards and
+// their paddocks the same way. "spacing" is how far apart the posts stand: the
+// road's own fences keep the original 4, while a long farm paddock asks for a
+// wider spacing so a big field does not cost a hundred little posts.
+export function buildFenceRun(x1, z1, x2, z2, spacing = 4) {
   const run = new THREE.Group();
   const dx = x2 - x1;
   const dz = z2 - z1;
   const length = Math.hypot(dx, dz);
   const angle = Math.atan2(dx, dz);
 
-  const count = Math.max(2, Math.round(length / 4) + 1);
+  const count = Math.max(2, Math.round(length / spacing) + 1);
   for (let i = 0; i < count; i++) {
     const t = i / (count - 1);
     const post = new THREE.Mesh(fencePostGeo, M.wood);
