@@ -11,6 +11,10 @@
 // barn door to open the barn menu and dress them up. The whole ranch is saved
 // into the browser, so closing the tab and coming back finds everything where
 // it was left.
+// Phase 5 (this slice): a pocket with coins and two different kinds of feed,
+// shown as a little row of numbers in the top-left corner, and a chicken coop
+// beside the house - four chickens pottering about a fenced pen, a shared
+// hunger bar over the hen house, and eggs to collect.
 
 import * as THREE from 'three';
 import { buildWorld } from './world.js';
@@ -20,6 +24,8 @@ import { createHorse, updateHorse, feedHorse, isHungry } from './horse.js';
 import { createInteractions } from './interact.js';
 import { createRiding } from './riding.js';
 import { createBarnMenu } from './menu.js';
+import { createInventory, createHud } from './inventory.js';
+import { createCoop } from './chickens.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
@@ -122,6 +128,21 @@ const horses = STARTING_HORSES.map((spec) => {
 });
 
 // ---------------------------------------------------------------------------
+// The chicken coop: a hen house and a fenced pen beside the house.
+//
+// The pen is 8 x 6 units centred at (-12, 0, 2), so it covers x -16..-8 and
+// z -1..5. The house sits at (-12, 0, -8) and takes up z -11..-5, and the dirt
+// path to the barn runs along z -5.5 - so the pen tucks into the empty grass
+// just SOUTH of both, with nearly three units of clear ground between the top
+// fence rail and the path.
+//
+// Its gate is in the middle of the east wall, at (-8, 0, 2), facing the yard -
+// which is the side Natalia always walks up from.
+// ---------------------------------------------------------------------------
+const COOP_POSITION = new THREE.Vector3(-12, 0, 2);
+const coop = createCoop({ scene, position: COOP_POSITION });
+
+// ---------------------------------------------------------------------------
 // The girls. Both stand in the yard in front of the house and the barn, which
 // are off towards -Z, so they start turned that way (rotation.y = PI faces -Z).
 // ---------------------------------------------------------------------------
@@ -152,6 +173,21 @@ const HORSE_BLOCK_RADIUS = 1.6;
 for (const h of horses) {
   controls.addObstacle(h, HORSE_BLOCK_RADIUS * h.userData.scale);
 }
+
+// The chicken pen is a rectangle nobody may walk into - not Natalia, and not a
+// horse she is riding. She talks to the chickens over the gate.
+controls.addBlockBox(coop.penBox);
+
+// ---------------------------------------------------------------------------
+// Natalia's pocket: her coins, her two kinds of feed and her eggs. It starts
+// with the new-game amounts, and a save file overwrites them further down.
+//
+// The HUD is the little row of numbers in the top-left corner. It redraws
+// itself whenever a number changes, and main.js asks it to redraw when the
+// number of CHICKENS changes, since that one is not an inventory item.
+// ---------------------------------------------------------------------------
+const inventory = createInventory();
+const hud = createHud(inventory, () => coop.count());
 
 // ---------------------------------------------------------------------------
 // Interactions: walk up to something and press a key. The system itself lives
@@ -224,7 +260,7 @@ function save(force = false) {
 
   lastSavedFrame = frameNumber;
   secondsSinceSave = 0;
-  saveGame(collectState({ natalia, horses }));
+  saveGame(collectState({ natalia, horses, inventory, coop }));
 }
 
 // The same save, with the "Saved" note: for the handful of moments the player
@@ -240,7 +276,13 @@ function saveAndShow() {
 // no tack, full hunger bars.
 const saved = loadGame();
 if (saved) {
-  applyState(saved, { natalia, horses, controls, bounds: world.bounds });
+  applyState(saved, {
+    natalia, horses, controls, bounds: world.bounds, inventory, coop,
+  });
+
+  // The coop may have gained or lost chickens, and the pocket may have changed
+  // - so redraw the row of numbers before the first frame.
+  hud.refresh();
 
   // Bring Stella along: put her on her following spot behind her sister rather
   // than leaving her to jog across the whole ranch on the first frame.
@@ -299,17 +341,31 @@ for (const h of horses) {
       {
         key: 'KeyF',
         // An empty label means "nothing to say about F right now", so a full
-        // horse simply does not show the feeding line.
-        getLabel: () => (isHungry(h) ? `Feed ${name}` : ''),
+        // horse simply does not show the feeding line. The number in brackets
+        // is how many sacks of horse feed are left in her pocket.
+        getLabel: () =>
+          isHungry(h) ? `Feed ${name} (🌾 ${inventory.get('horseFeed')})` : '',
         onPress: () => {
           // Feeding from the saddle is allowed - she can lean down.
-          if (feedHorse(h)) {
-            interactions.showMessage(`Yum! ${name} is happy.`);
-            // A full hunger bar is worth remembering.
-            saveAndShow();
-          } else {
+          if (!isHungry(h)) {
             interactions.showMessage(`${name} isn't hungry right now.`);
+            return;
           }
+
+          // One sack of horse feed per meal. spend() refuses - and changes
+          // nothing - when the sack cupboard is empty, so the horse stays
+          // hungry and she is told where to get more.
+          if (!inventory.spend('horseFeed', 1)) {
+            interactions.showMessage('No horse feed! Buy some at the store.');
+            return;
+          }
+
+          feedHorse(h);
+          interactions.showMessage(
+            `Yum! ${name} is happy. (🌾 ${inventory.get('horseFeed')} left)`
+          );
+          // A full hunger bar and one fewer sack are both worth remembering.
+          saveAndShow();
         },
       },
     ],
@@ -377,6 +433,71 @@ interactions.register({
 });
 
 // ---------------------------------------------------------------------------
+// The chicken coop. The spot we measure from is the pen gate at (-8, 0, 2) -
+// the middle of the east fence, facing the yard. The pen itself is a no-go
+// rectangle, so Natalia always stands just outside it; a radius of 3.5 gives
+// her a comfortable patch of grass by the gate where the prompt shows up.
+//
+//   E  collect the eggs lying in the pen
+//   F  feed the chickens one handful of chicken feed
+//
+// Chicken feed is NOT horse feed: the corn is 🌽 and the oats are 🌾, and one
+// will not do for the other.
+// ---------------------------------------------------------------------------
+interactions.register({
+  object: coop.gate,
+  radius: 3.5,
+  actions: [
+    {
+      key: 'KeyE',
+      // No eggs waiting? Then E has nothing to say, the same way a full horse
+      // says nothing about F.
+      getLabel: () => {
+        const waiting = coop.eggsWaiting();
+        return waiting > 0 ? `Collect eggs (${waiting})` : '';
+      },
+      onPress: () => {
+        const collected = coop.collectEggs();
+        if (collected <= 0) {
+          interactions.showMessage('No eggs yet. Come back soon!');
+          return;
+        }
+        inventory.add('eggs', collected);
+        interactions.showMessage(
+          collected === 1
+            ? 'You found an egg! (🥚 1)'
+            : `You found ${collected} eggs! (🥚 ${collected})`
+        );
+        saveAndShow();
+      },
+    },
+    {
+      key: 'KeyF',
+      getLabel: () =>
+        coop.isHungry() ? `Feed chickens (🌽 ${inventory.get('chickenFeed')})` : '',
+      onPress: () => {
+        if (!coop.isHungry()) {
+          interactions.showMessage("The chickens aren't hungry right now.");
+          return;
+        }
+
+        // One handful of corn fills the whole coop.
+        if (!inventory.spend('chickenFeed', 1)) {
+          interactions.showMessage('No chicken feed! Buy some at the store.');
+          return;
+        }
+
+        coop.feed();   // full bar, and every chicken does a happy little hop
+        interactions.showMessage(
+          `Cluck cluck! (🌽 ${inventory.get('chickenFeed')} left)`
+        );
+        saveAndShow();
+      },
+    },
+  ],
+});
+
+// ---------------------------------------------------------------------------
 // Keep the picture the right shape when the window is resized.
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
@@ -419,23 +540,67 @@ function update(dt) {
     updateHorse(h, dt, camera);
     h.userData.setMoving(h === riddenHorse && controls.isMoving(), dt);
   }
-  // 5. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
+  // 5. The chicken coop: the flock gets hungrier, the chickens potter about
+  //    the pen, and now and then one leaves an egg in the grass.
+  const chickensBefore = coop.count();
+  coop.update(dt, camera);
+  // Chickens are not an inventory item, so the HUD only hears about them when
+  // we tell it. (Nothing adds or removes chickens yet - the market stall in
+  // the next slice will - but the wiring is here and ready for it.)
+  if (coop.count() !== chickensBefore) hud.refresh();
+
+  // 6. Show the "E: Ride Biscuit" prompt when she is close enough, and act on
   //    E and F. While the barn menu is open this does nothing.
   interactions.update(dt);
-  // 6. The barn menu gets its frame too. It has nothing to animate today, but
+  // 7. The barn menu gets its frame too. It has nothing to animate today, but
   //    calling it means this loop never has to change if that alters.
   barnMenu.update(dt);
-  // 7. The quiet autosave. dt piles up until five seconds have gone by, then
+  // 8. The quiet autosave. dt piles up until five seconds have gone by, then
   //    the ranch is written out and the count starts again (save() resets it).
   secondsSinceSave += dt;
   if (secondsSinceSave >= AUTOSAVE_SECONDS) save();
 }
 
+// While this is true the loop still DRAWS but stops updating. Only the debug
+// handle below ever sets it.
+let paused = false;
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
-  update(dt);
+  if (!paused) update(dt);
   renderer.render(scene, camera);
 }
+
+// ---------------------------------------------------------------------------
+// A small handle on the game, hung off the page itself.
+//
+// It exists so that a test script (or a curious grown-up with the browser
+// console open) can look at the ranch and step it forward by a fixed amount of
+// time instead of waiting for real seconds to go by:
+//
+//   ranch.setPaused(true);          // stop the clock
+//   ranch.update(1 / 60);           // one frame, exactly
+//   ranch.inventory.get('horseFeed');
+//
+// The game itself never reads any of this - take the whole block out and
+// nothing changes on screen.
+// ---------------------------------------------------------------------------
+window.ranch = {
+  scene,
+  camera,
+  natalia,
+  stella,
+  horses,
+  coop,
+  inventory,
+  hud,
+  controls,
+  interactions,
+  riding,
+  update,
+  save,
+  setPaused: (value) => { paused = !!value; },
+};
 
 animate();

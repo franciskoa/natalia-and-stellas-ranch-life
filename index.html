@@ -41,6 +41,43 @@
       white-space: nowrap;
     }
 
+    /* THE HUD: the small row of numbers in the TOP-LEFT corner, showing what
+       Natalia is carrying - coins, horse feed, chicken feed, eggs - and how
+       many chickens are in the pen. js/inventory.js fills it in and keeps it
+       up to date. It is styled like the hint box in the opposite corner on
+       purpose: a quiet note in the margin, never part of the game. */
+    #hud {
+      position: fixed;
+      left: 12px;
+      top: 12px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(20, 24, 30, 0.55);
+      color: #e8ecf2;
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.35;
+      opacity: 0.9;
+      pointer-events: none;          /* clicks pass through to the game */
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    /* The numbers themselves: "🪙 20 · 🌾 3 · 🌽 5 · 🥚 0 · 🐔 4". */
+    #hud-items {
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    /* The tiny key underneath, so a young player knows what 🌾 means without
+       having to hover over anything. Deliberately small and faint. */
+    #hud-legend {
+      margin-top: 1px;
+      font-size: 10px;
+      font-weight: normal;
+      opacity: 0.62;
+    }
+
     /* The key names at the start of each line ("Move:", "E:"), a touch
        brighter so the eye can scan down the left edge of the list. */
     #hint b {
@@ -54,8 +91,8 @@
     #prompt {
       position: fixed;
       left: 50%;
-      /* Clear of the short five-line hint box in the bottom-left corner. */
-      bottom: 108px;
+      /* Clear of the short six-line hint box in the bottom-left corner. */
+      bottom: 126px;
       transform: translateX(-50%);
       padding: 8px 14px;
       border-radius: 10px;
@@ -110,8 +147,13 @@
     /* On a phone-sized screen everything shrinks one more notch so the
        three text boxes still leave the game itself room to breathe. */
     @media (max-width: 700px) {
-      #hint {
+      #hint,
+      #hud {
         font-size: 11px;
+      }
+
+      #hud-legend {
+        font-size: 9px;
       }
 
       #prompt,
@@ -408,13 +450,22 @@
   </script>
 </head>
 <body>
-  <!-- On-screen controls hint: five short lines, tucked in the corner. -->
+  <!-- What Natalia is carrying, top-left. js/inventory.js writes the numbers
+       into #hud-items and the words into #hud-legend. The "title" is filled in
+       too, so hovering over it says the same thing. -->
+  <div id="hud" title="coins · horse feed · chicken feed · eggs · chickens">
+    <div id="hud-items">🪙 20 · 🌾 3 · 🌽 5 · 🥚 0 · 🐔 4</div>
+    <div id="hud-legend">coins · horse feed · chicken feed · eggs · chickens</div>
+  </div>
+
+  <!-- On-screen controls hint: six short lines, tucked in the corner. -->
   <div id="hint">
     <b>Move:</b> W A S D / arrows<br>
     <b>Look:</b> drag mouse<br>
-    <b>E:</b> ride / get off<br>
+    <b>E:</b> ride / get off / collect eggs<br>
     <b>F:</b> feed<br>
-    <b>Barn:</b> press E at the barn door
+    <b>Barn:</b> press E at the barn door<br>
+    <b>Coop:</b> press E at the chicken gate
   </div>
 
   <!-- "Press E to ..." appears here when Natalia is close to something. -->

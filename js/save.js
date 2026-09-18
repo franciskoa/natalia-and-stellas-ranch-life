@@ -10,8 +10,21 @@
 //   loadGame()                         -> the saved object, or null
 //   saveGame(data)                     -> true if it was written, false if not
 //   clearSave()                        - throw the save away ("Start over")
-//   collectState({ natalia, horses })  -> the plain object we save
+//   collectState({ natalia, horses, inventory, coop })
+//                                      -> the plain object we save
 //   applyState(state, { ... })         - put a loaded save back into the world
+//
+// ---------------------------------------------------------------------------
+// SAVE VERSIONS
+//
+// Version 1 (Phase 4) held the player and the horses.
+// Version 2 (Phase 5) adds her pocket (coins and feed) and the chicken coop.
+//
+// A version 1 save still loads: the parts it does not have simply get the
+// new-game defaults (20 coins, 3 horse feed, 5 chicken feed, 0 eggs, and four
+// chickens with a full bar). Nobody loses the horses they dressed up in
+// Phase 4 just because the game learned about chickens.
+// ---------------------------------------------------------------------------
 //
 // ---------------------------------------------------------------------------
 // WHY EVERY SINGLE STORAGE CALL IS WRAPPED IN try/catch
@@ -30,13 +43,26 @@
 // ---------------------------------------------------------------------------
 
 import { setSaddle, setBlanket } from './horse.js';
+import { STARTING_INVENTORY } from './inventory.js';
 
 // The one key in localStorage that belongs to this game.
 export const SAVE_KEY = 'ranchLifeSave';
 
-// The shape of the save file. If a later phase changes the shape in a way old
-// saves cannot survive, bump this number and old saves get ignored.
-export const SAVE_VERSION = 1;
+// The shape of the save file we WRITE.
+export const SAVE_VERSION = 2;
+
+// The oldest shape we can still READ. Anything between this and SAVE_VERSION
+// is loaded and quietly brought up to date (see applyState).
+export const OLDEST_READABLE_VERSION = 1;
+
+// What the coop looks like in a brand new game, and therefore what a version 1
+// save (which had never heard of chickens) gets filled in with.
+const DEFAULT_COOP = {
+  hunger: 100,
+  chickens: 4,
+  eggsOnGround: 0,
+  eggTimer: 0,
+};
 
 // Hunger runs 0..100, the same as in horse.js.
 const MAX_HUNGER = 100;
@@ -101,7 +127,10 @@ export function loadGame() {
     // just want to be sure this really is one of our save files.
     if (!data || typeof data !== 'object') return null;
     if (typeof data.version !== 'number') return null;
-    if (data.version !== SAVE_VERSION) return null;   // an older/newer format
+    // Older saves we still understand are welcome; a save from a FUTURE
+    // version is not, because we have no idea what is in it.
+    if (data.version < OLDEST_READABLE_VERSION) return null;
+    if (data.version > SAVE_VERSION) return null;
     if (!Array.isArray(data.horses)) return null;
 
     return data;
@@ -151,13 +180,15 @@ export function clearSave() {
 //
 // The shape:
 //   {
-//     version: 1,
+//     version: 2,
 //     savedAt: 1758200000000,                 // Date.now(), just for humans
 //     player: { x, z, rotationY },
 //     horses: [
 //       { id, name, kind, hunger, saddle, blanket, x, z, rotationY },
 //       ...
-//     ]
+//     ],
+//     inventory: { coins, horseFeed, chickenFeed, eggs },
+//     coop: { hunger, chickens, eggsOnGround, eggTimer }
 //   }
 //
 // Note there is no y: everybody stands on flat grass, so y is always 0.
@@ -169,7 +200,7 @@ export function clearSave() {
 // the controls subject on load, and that is a lot of fiddly machinery to buy
 // one second of convenience. Simple wins.
 // ---------------------------------------------------------------------------
-export function collectState({ natalia, horses } = {}) {
+export function collectState({ natalia, horses, inventory, coop } = {}) {
   const horseList = horses ?? [];
 
   // Where is Natalia? While she is riding she is a CHILD of the horse, so her
@@ -211,6 +242,15 @@ export function collectState({ natalia, horses } = {}) {
         rotationY: horse.rotation.y,
       };
     }),
+
+    // Her pocket: coins, horse feed, chicken feed, eggs. inventory.all()
+    // already hands back a plain copy, which is exactly what JSON wants.
+    inventory: inventory ? inventory.all() : { ...STARTING_INVENTORY },
+
+    // The coop: one shared hunger, how many chickens are in the pen, how many
+    // eggs are lying about waiting to be picked up, and how far along the
+    // next egg is. chickens.js builds this for us with getState().
+    coop: coop ? coop.getState() : { ...DEFAULT_COOP },
   };
 }
 
@@ -227,7 +267,10 @@ export function collectState({ natalia, horses } = {}) {
 // "resolveSpot" function; "bounds" is optional and only used to clamp Natalia
 // before we ask for a safe spot.
 // ---------------------------------------------------------------------------
-export function applyState(state, { natalia, horses, controls, resolveSpot, bounds } = {}) {
+export function applyState(
+  state,
+  { natalia, horses, controls, resolveSpot, bounds, inventory, coop } = {}
+) {
   if (!state) return false;
 
   const horseList = horses ?? [];
@@ -289,6 +332,27 @@ export function applyState(state, { natalia, horses, controls, resolveSpot, boun
 
     natalia.position.set(x, 0, z);
     natalia.rotation.y = finiteOr(player.rotationY, natalia.rotation.y);
+  }
+
+  // --- her pocket -----------------------------------------------------------
+  // A version 1 save has no "inventory" at all. setAll only touches the keys
+  // it is given, so passing the new-game amounts in that case leaves her with
+  // 20 coins and a little feed rather than an empty pocket.
+  if (inventory) {
+    const saved = state.inventory;
+    inventory.setAll(
+      saved && typeof saved === 'object' ? saved : { ...STARTING_INVENTORY }
+    );
+  }
+
+  // --- the chicken coop -----------------------------------------------------
+  // Same idea: a version 1 save gets a brand new coop - four chickens, a full
+  // bar and no eggs on the ground - instead of an empty pen.
+  if (coop) {
+    const saved = state.coop;
+    coop.setState(
+      saved && typeof saved === 'object' ? saved : { ...DEFAULT_COOP }
+    );
   }
 
   return true;

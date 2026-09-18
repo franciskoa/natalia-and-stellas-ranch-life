@@ -17,6 +17,10 @@
 //                            with no gliding (main.js uses it after a save
 //                            file has moved Natalia somewhere else)
 //   addObstacle(obj, r)    - a round thing to walk around that can move about
+//   addBlockBox(box)       - a rectangle on the ground nobody may walk into,
+//                            given as { minX, maxX, minZ, maxZ }. The house
+//                            and the barn are built in below; Phase 5 adds the
+//                            chicken pen this way.
 //   isSpotFree(x, z, r, ignore)
 //                          - is that patch of grass clear of the buildings AND
 //                            of every round obstacle (the other horses), and
@@ -66,6 +70,31 @@ export const BLOCK_BOXES = [
   { minX: -15.5, maxX: -8.5, minZ: -11.5, maxZ: -4.5 }, // house
   { minX: 8.5, maxX: 19.5, minZ: -14.5, maxZ: -5.5 },   // barn
 ];
+
+// ---------------------------------------------------------------------------
+// addBlockBox - add another rectangle nobody may walk into, e.g. the chicken
+// pen in Phase 5. It goes into the same list as the house and the barn, so
+// every bit of collision code below picks it up without any extra work.
+//
+// It is exported on its own AND handed out by createControls, because the two
+// spot helpers further down (isSpotFree, resolveSpot) are exported too and
+// read the very same list.
+// ---------------------------------------------------------------------------
+export function addBlockBox(box) {
+  if (!box) return null;
+  const tidy = {
+    minX: Math.min(box.minX, box.maxX),
+    maxX: Math.max(box.minX, box.maxX),
+    minZ: Math.min(box.minZ, box.maxZ),
+    maxZ: Math.max(box.minZ, box.maxZ),
+  };
+  // Every number has to be a real number, or the collision maths goes strange.
+  for (const value of Object.values(tidy)) {
+    if (!Number.isFinite(value)) return null;
+  }
+  BLOCK_BOXES.push(tidy);
+  return tidy;
+}
 
 // Round things - horses - are added with addObstacle(). They are stored as the
 // object itself, not as x/z numbers, because a horse walks about: we read its
@@ -511,6 +540,7 @@ export function createControls(player, camera, domElement, bounds) {
     setEnabled,
     snapCamera,
     addObstacle,
+    addBlockBox,
     isSpotFree: isSpotFreeHere,
     resolveSpot: resolveSpotHere,
   };

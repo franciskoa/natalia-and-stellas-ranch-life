@@ -45,6 +45,7 @@
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
+import { createHungerBar } from './bar.js';
 
 // ---------------------------------------------------------------------------
 // The kinds of horse. Each one is a coat, a few colours and its own stats:
@@ -156,12 +157,6 @@ const BAR_WIDTH = 1.6;
 const BAR_THICKNESS = 0.22;
 const BAR_DEPTH = 0.05;
 
-// Bar colours: full and happy, getting peckish, really hungry.
-const BAR_GREEN = 0x4caf50;
-const BAR_YELLOW = 0xffc107;
-const BAR_RED = 0xe53935;
-const BAR_BACKGROUND = 0x2b2b2b; // dark grey, so the fill stands out
-
 // ---------------------------------------------------------------------------
 // Materials. One per colour, made once and shared by every mesh that uses it,
 // which keeps the game light on the graphics card.
@@ -262,62 +257,10 @@ function buildBlanket() {
   return { blanket, material };
 }
 
-// ---------------------------------------------------------------------------
-// The hunger bar: two flat boxes, no HTML at all.  The background is a dark
-// slab and the coloured fill sits just in front of it.
-//
-// The trick with the fill: its shape is shifted inside itself so that its LEFT
-// edge sits at the mesh origin. Then the mesh is parked at the left end of the
-// bar, and shrinking it with scale.x pulls it in from the right, exactly like
-// a health bar in a real game.
-// ---------------------------------------------------------------------------
-function buildHungerBar() {
-  // "holder" is the part we spin each frame so the bar faces the camera.
-  const holder = new THREE.Group();
-  holder.name = 'hungerBar';
-
-  // MeshBasicMaterial ignores the lights, so the bar keeps the same bright
-  // colour no matter which way the sun is shining.
-  const background = new THREE.Mesh(
-    new THREE.BoxGeometry(BAR_WIDTH, BAR_THICKNESS, BAR_DEPTH),
-    new THREE.MeshBasicMaterial({ color: BAR_BACKGROUND })
-  );
-  holder.add(background);
-
-  // The fill is a little smaller than the background, so a thin dark border
-  // shows all the way round it.
-  const fillWidth = BAR_WIDTH - 0.1;
-  const fillGeo = new THREE.BoxGeometry(fillWidth, BAR_THICKNESS - 0.07, BAR_DEPTH);
-  // Move the shape sideways inside itself: now x = 0 is its left edge.
-  fillGeo.translate(fillWidth / 2, 0, 0);
-
-  const fill = new THREE.Mesh(
-    fillGeo,
-    new THREE.MeshBasicMaterial({ color: BAR_GREEN })
-  );
-  // Park it at the left end of the background, a hair in front of it.
-  fill.position.set(-fillWidth / 2, 0, BAR_DEPTH * 0.6);
-  holder.add(fill);
-
-  return { holder, fill };
-}
-
-// Pick the bar colour for a hunger value: green while the horse is well fed,
-// yellow when it is getting peckish, red when it is really hungry.
-function barColorFor(hunger) {
-  if (hunger >= 60) return BAR_GREEN;
-  if (hunger >= 30) return BAR_YELLOW;
-  return BAR_RED;
-}
-
-// Make the bar match the horse's current hunger: how long it is, and its colour.
+// Make the bar match the horse's current hunger: how long it is, and its
+// colour. The bar itself is built by bar.js, which the chicken coop uses too.
 function refreshBar(horse) {
-  const data = horse.userData;
-  const fraction = data.hunger / MAX_HUNGER;
-  // Never scale all the way down to zero: a zero-wide shape upsets the maths
-  // Three.js does behind the scenes, so we always leave a sliver.
-  data.barFill.scale.x = Math.max(0.001, fraction);
-  data.barFill.material.color.setHex(barColorFor(data.hunger));
+  horse.userData.bar.setValue(horse.userData.hunger, MAX_HUNGER);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +361,7 @@ export function createHorse({
   // The floating hunger bar rides along as a child of the OUTER group, so we
   // can place it in real world units. It is scaled to match the horse, so a
   // pony gets a pony-sized bar.
-  const bar = buildHungerBar();
+  const bar = createHungerBar({ width: BAR_WIDTH, thickness: BAR_THICKNESS, depth: BAR_DEPTH });
   bar.holder.scale.setScalar(scale);
   bar.holder.position.y = BACK_TOP * scale + BAR_ABOVE_BACK;
   horse.add(bar.holder);
@@ -481,6 +424,7 @@ export function createHorse({
     head,                  // the mesh that bobs when we feed it
     headRestAngle: head.rotation.x,
     feedTimer: 0,          // counts down through the happy head-bob
+    bar,                   // the bar.js helper: setValue() and faceCamera()
     barHolder: bar.holder, // the part that turns to face the camera
     barFill: bar.fill,     // the coloured part we shrink as hunger drops
     frame,                 // the scaled group holding the whole animal
@@ -554,9 +498,6 @@ export function setBlanket(horse, colorKey) {
   return data.blanket;
 }
 
-// A scratch vector, made once and re-used, so we are not creating new objects
-// sixty times a second.
-const cameraWorldPosition = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
 // updateHorse - call once per frame from the game loop.
@@ -589,10 +530,7 @@ export function updateHorse(horse, dt, camera) {
   // 4. Turn the bar to face the camera ("billboarding"), so it stays readable
   //    from every side. lookAt points an object's +Z at the target, and it
   //    takes the horse's own turn into account for us.
-  if (camera) {
-    camera.getWorldPosition(cameraWorldPosition);
-    data.barHolder.lookAt(cameraWorldPosition);
-  }
+  data.bar.faceCamera(camera);
 }
 
 // ---------------------------------------------------------------------------
