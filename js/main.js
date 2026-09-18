@@ -77,7 +77,10 @@ import { createCoop, MAX_CHICKENS } from './chickens.js';
 import { createGarden, CROPS } from './garden.js';
 import { loadGame, saveGame, clearSave, collectState, applyState } from './save.js';
 import { createSound } from './sound.js';
-import { createTitleScreen, createPauseMenu, createTopButtons } from './title.js';
+import {
+  createTitleScreen, createPauseMenu, createTopButtons, setHowToTouch,
+} from './title.js';
+import { createTouchControls } from './touch.js';
 
 // Sky colour. The same value is used in index.html so the page never flashes
 // white before Three.js starts drawing.
@@ -125,9 +128,35 @@ export const STARTING_HORSES = [
 // ---------------------------------------------------------------------------
 // Renderer - the thing that actually draws pixels into a <canvas>.
 // ---------------------------------------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-// Capping the pixel ratio at 2 keeps high-DPI screens from doing 3x the work.
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+// IS THIS A PHONE OR A TABLET? A "coarse" pointer means a finger rather than a
+// mouse. The answer changes two things about how the picture is drawn, both of
+// them about keeping a phone's little graphics chip comfortable - and it is
+// asked HERE, before the renderer is built, because both have to be decided
+// before the first frame.
+//
+// (js/touch.js asks the same question again for the thumb controls, and it has
+// two more ways of answering it - a ?touch=1 in the address bar, and the first
+// real prod of the screen. This one is only about drawing speed, so the simple
+// question is the right one: a laptop with a touchscreen and a proper graphics
+// chip should keep its full-quality picture until somebody tells it not to.)
+const COARSE_POINTER = (() => {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  } catch (error) {
+    return false;
+  }
+})();
+
+// Smoothed edges are lovely on a laptop and expensive on a phone, where every
+// pixel is drawn by a chip sharing its power with the screen and the radio.
+const renderer = new THREE.WebGLRenderer({ antialias: !COARSE_POINTER });
+
+// HOW MANY REAL PIXELS PER GAME PIXEL. A modern phone claims 3, which means
+// nine times the drawing for a picture no child will ever see the difference
+// in. Capping it at 2 on a laptop and 1.5 on a phone is the single biggest
+// thing in the whole game for keeping the frame rate up.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, COARSE_POINTER ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -439,6 +468,33 @@ createTopButtons({
   },
 });
 
+// ---------------------------------------------------------------------------
+// THE THUMB CONTROLS (Phase 8 part 2) - how the game is played on a phone.
+//
+// A floating joystick under the left thumb for walking, a drag anywhere else
+// for looking, and one or two big round buttons in the bottom-right corner
+// doing the job of the E and F keys. None of it appears on a laptop with a
+// mouse; see the long note at the top of js/touch.js for the three ways it
+// decides it is on a touch screen.
+//
+// It is built here, with the rest of the on-screen furniture, but it does not
+// come UP until frame() calls its update() - which is where it also takes
+// itself off the screen whenever something is in the way.
+//
+// isBlocked is the whole "not now" list in one line: the front page, the pause
+// menu, any of the four panels, or the ranch being on hold for any other
+// reason. Every one of those has its own big buttons to tap, and a joystick
+// floating over them would only be in the way.
+// ---------------------------------------------------------------------------
+const touchControls = createTouchControls({
+  controls,
+  interactions,
+  isBlocked: () => paused || titleScreen.isOpen()
+    || pauseMenu.isOpen() || isPanelOpen(),
+  // The front page's four little how-to cards swap from keys to thumbs.
+  onModeChange: (on) => setHowToTouch(on),
+});
+
 // ===========================================================================
 // PUTTING A HORSE IN THE WORLD
 //
@@ -708,9 +764,50 @@ if (saved) {
 // Closing the tab, or switching to another tab on a phone (where "hidden" is
 // often the last thing we hear before the browser throws the page away).
 window.addEventListener('beforeunload', () => save(true));
+
+// ---------------------------------------------------------------------------
+// GOING AWAY AND COMING BACK. On a phone this happens constantly: a message
+// arrives, the screen locks, somebody checks the time. Three things have to be
+// got right each time, and all three live here.
+// ---------------------------------------------------------------------------
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') save(true);
+  if (document.visibilityState === 'hidden') {
+    // 1. Write the ranch out. On a phone "hidden" is very often the last thing
+    //    we ever hear before the browser throws the page away.
+    save(true);
+    return;
+  }
+
+  // 2. Throw away the gap. The clock has been ticking the whole time the phone
+  //    was in a pocket, and clock.getDelta() would hand that entire stretch to
+  //    the very next frame. (frame() caps it anyway - this is the belt to that
+  //    pair of braces, and it keeps the cap from being felt at all.)
+  clock.getDelta();
+
+  // 3. Wake the sound up on the next tap. iOS puts the audio to sleep when the
+  //    page goes into the background and will only let it start again from a
+  //    real gesture - so we ask for the very next one, whatever it is, and then
+  //    get out of the way.
+  wakeSoundOnNextGesture();
 });
+
+// The other half of point 3 above: one listener each for a tap and a key,
+// both of which take the pair of them off again the moment either one fires.
+//
+// wakeSound is written ONCE, up here, rather than inside the function below.
+// That matters: addEventListener ignores a function it already has, so a phone
+// that goes in and out of a pocket twenty times still ends up with exactly one
+// pair of these waiting, not twenty.
+function wakeSound() {
+  window.removeEventListener('pointerup', wakeSound);
+  window.removeEventListener('keydown', wakeSound);
+  sound.unlock();
+}
+
+function wakeSoundOnNextGesture() {
+  window.addEventListener('pointerup', wakeSound);
+  window.addEventListener('keydown', wakeSound);
+}
 
 // ---------------------------------------------------------------------------
 // The barn menu: the panel of big buttons for choosing a horse and painting
@@ -1513,16 +1610,33 @@ titleScreen.show();
 // purely so that a test can tick the game exactly the way the browser does -
 // including the part where the title screen holds everything still.
 function frame(dt) {
+  // ONE CAP FOR THE WHOLE TICK. A tab that has been in the background for five
+  // minutes hands back a dt of 300 seconds the moment it comes forward again,
+  // and without this every horse would starve, every crop would ripen and
+  // Natalia would be flung across the ranch in a single frame. A tenth of a
+  // second is the longest step anything in the game is ever given.
+  const step = Math.min(Math.max(Number(dt) || 0, 0), 0.1);
+
+  // The thumb controls get their frame FIRST, and whatever else happens: they
+  // have to be able to take themselves off the screen while the front page or
+  // a panel is up, and both of those stop the game right here.
+  touchControls.update(step);
+
   if (titleScreen.isOpen()) {
-    controls.orbit(Math.min(dt, 0.1));
+    controls.orbit(step);
     return;
   }
   if (paused) return;
-  update(dt);
+  update(step);
 }
 
 function animate() {
   requestAnimationFrame(animate);
+  // NOTHING TO DRAW while the tab is in the background or the phone is locked.
+  // Browsers nearly always stop calling us anyway, but a browser that does not
+  // would otherwise have the little graphics chip drawing a ranch nobody is
+  // looking at - and on a phone that is somebody's battery.
+  if (document.hidden) return;
   frame(clock.getDelta());
   renderer.render(scene, camera);
 }
@@ -1585,6 +1699,10 @@ window.ranch = {
   sound,
   titleScreen,
   pauseMenu,
+  // Phase 8 part 2: the thumb controls, and how the picture is drawn on a
+  // phone. A test looks at both.
+  touchControls,
+  coarsePointer: COARSE_POINTER,
   startGame,
   isPanelOpen,
   isPaused: () => paused,

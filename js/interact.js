@@ -33,6 +33,20 @@
 //   setEnabled(bool)         - false while a menu is open: the prompt is
 //                              hidden and E and F do nothing
 //   showMessage(text, secs)  - flash a short message at the top of the screen
+//   currentActions()         - Phase 8, for the on-screen buttons on a phone:
+//                              a plain list of what the player could do right
+//                              here, as [{ key, label, press }]. Only actions
+//                              with something to say are in it - the very same
+//                              test the prompt above uses - so the buttons and
+//                              the words always agree.
+//   press(code)              - do whatever that key would have done, as though
+//                              it had just been pressed. The touch buttons call
+//                              it, so a tap and a key press go down exactly the
+//                              same road (queued now, acted on in update()).
+//   setShowKeyNames(bool)    - false on a phone, where there is no E key to
+//                              press: the prompt then reads "Ride Biscuit"
+//                              rather than "E: Ride Biscuit", because the round
+//                              button on the screen is what you press instead.
 
 import * as THREE from 'three';
 
@@ -104,6 +118,10 @@ export function createInteractions(player, promptElement, messageElement) {
   // on screen, and E and F do nothing.
   let enabled = true;
 
+  // Does the prompt print the key letters ("E: Ride Biscuit")? True on a
+  // keyboard, false on a phone, where the round buttons do that job.
+  let showKeyNames = true;
+
   // --- the interaction keys -------------------------------------------------
   // These live here and not in controls.js on purpose: walking keys are held
   // down, but E and F are one-shot presses, so the two are handled differently.
@@ -169,6 +187,11 @@ export function createInteractions(player, promptElement, messageElement) {
     for (const action of target.actions) {
       const label = action.getLabel();
       if (!label) continue;  // nothing to say about this key right now
+      // On a phone there is no key to name, so the words stand on their own.
+      if (!showKeyNames) {
+        lines.push(escapeHtml(label));
+        continue;
+      }
       lines.push('<b>' + escapeHtml(keyName(action.key)) + '</b>: ' + escapeHtml(label));
     }
     return lines.join('<br>');
@@ -255,6 +278,50 @@ export function createInteractions(player, promptElement, messageElement) {
     return activeTarget;
   }
 
+  // ---------------------------------------------------------------------------
+  // THE TOUCH HOOKS (Phase 8)
+  //
+  // On a phone there is no E key, so js/touch.js puts a big round button on the
+  // screen instead. These three little functions are everything it needs, and
+  // they are deliberately tiny: the button asks what could be done here, prints
+  // those words on itself, and hands the key press straight back to us.
+  // ---------------------------------------------------------------------------
+
+  // press('KeyE') - exactly as though the player had pressed E a moment ago.
+  // It goes into the SAME queue a real key press goes into, so update() acts on
+  // it in the same place, in the same order, on the very next frame. Nothing in
+  // the game can tell a tap from a key press, which is the whole idea.
+  function press(code) {
+    if (!enabled) return false;
+    if (!watchedKeys.has(code)) return false;
+    pressedKeys.add(code);
+    return true;
+  }
+
+  // What could the player do right here? One entry per action that has
+  // something to say, in the order the actions were registered - which is why
+  // E always comes before F, and so the big button is always the E one.
+  function currentActions() {
+    if (!enabled || !activeTarget) return [];
+
+    const list = [];
+    for (const action of activeTarget.actions) {
+      const label = action.getLabel();
+      if (!label) continue;   // nothing to offer on this key right now
+      list.push({
+        key: action.key,
+        label,
+        press: () => press(action.key),
+      });
+    }
+    return list;
+  }
+
+  // On a phone the prompt drops the "E:" and "F:" key names.
+  function setShowKeyNames(value) {
+    showKeyNames = !!value;
+  }
+
   // Measure distances from something else from now on (the horse, while riding).
   function setPlayer(object) {
     if (object) distanceFrom = object;
@@ -275,5 +342,9 @@ export function createInteractions(player, promptElement, messageElement) {
   hidePrompt();
   hideMessage();
 
-  return { register, update, current, setPlayer, setEnabled, showMessage };
+  return {
+    register, update, current, setPlayer, setEnabled, showMessage,
+    // Phase 8, for the on-screen buttons on a phone.
+    currentActions, press, setShowKeyNames,
+  };
 }

@@ -77,19 +77,42 @@ function keyCap(letter) {
 //
 // It is built fresh each time it is asked for, because the title screen and
 // the pause menu each need their own copy (one <div> cannot be in two places).
+//
+// THERE ARE TWO SETS OF CARDS: one about keys, for a laptop, and one about
+// thumbs, for a phone. js/touch.js cannot know which it is until it has either
+// asked the browser or felt the first prod of a finger - which may well be
+// AFTER the front page has been drawn - so setHowToTouch() below swaps every
+// strip that has been built over, wherever it is.
 // ---------------------------------------------------------------------------
-const HOW_TO = [
+const HOW_TO_KEYS = [
   { picture: '🚶‍♀️', keys: ['W', 'A', 'S', 'D'], words: 'Walk about' },
   { picture: '🖱️', keys: ['drag'], words: 'Look around' },
   { picture: '🐴', keys: ['E'], words: 'Ride · open · pick' },
   { picture: '🌾', keys: ['F'], words: 'Feed the animals' },
 ];
 
-function buildHowTo(id) {
-  const strip = div('howto');
-  if (id) strip.id = id;
+// The same four things, said with thumbs. No key is named anywhere, because
+// there is not one to press.
+const HOW_TO_TOUCH = [
+  { picture: '👆', keys: ['left thumb'], words: 'Walk about' },
+  { picture: '👉', keys: ['right thumb'], words: 'Look around' },
+  { picture: '🐴', keys: ['tap'], words: 'Ride · open · pick' },
+  { picture: '🌾', keys: ['tap'], words: 'Feed the animals' },
+];
 
-  for (const item of HOW_TO) {
+// Which set of cards is the game showing? It starts on the keys and only ever
+// changes once, the moment touch.js says this is a phone.
+let howToTouch = false;
+
+// Every strip that has been built, so they can all be swapped over at once.
+// There are only ever two of them (the title screen's and the pause menu's).
+const builtStrips = [];
+
+// Fill one strip with one set of cards, throwing away whatever was in it.
+function fillHowTo(strip) {
+  strip.textContent = '';
+
+  for (const item of (howToTouch ? HOW_TO_TOUCH : HOW_TO_KEYS)) {
     const card = div('howto-card');
     card.appendChild(div('howto-pic', item.picture));
 
@@ -100,8 +123,41 @@ function buildHowTo(id) {
     card.appendChild(div('howto-words', item.words));
     strip.appendChild(card);
   }
+}
 
+function buildHowTo(id) {
+  const strip = div('howto');
+  if (id) strip.id = id;
+  builtStrips.push(strip);
+  fillHowTo(strip);
   return strip;
+}
+
+// The one line under the cards that they do not cover: how to reach the menu.
+function menuLine() {
+  return howToTouch
+    ? 'Tap ☰ in the corner at any time for the menu'
+    : 'Press Esc at any time for the menu';
+}
+
+// ---------------------------------------------------------------------------
+// setHowToTouch(true) - this is a phone: show thumbs, not keys.
+//
+// js/main.js calls it the moment js/touch.js switches the thumb controls on,
+// which may be before the front page has appeared (a phone) or a good while
+// after it (a laptop with a touchscreen, the first time anybody prods it).
+// Either way every strip already on the screen is redrawn on the spot.
+// ---------------------------------------------------------------------------
+export function setHowToTouch(on) {
+  const next = !!on;
+  if (next === howToTouch) return;
+  howToTouch = next;
+
+  for (const strip of builtStrips) fillHowTo(strip);
+  // The "Press Esc" line under the title screen's cards changes with them.
+  for (const line of document.querySelectorAll('.title-esc')) {
+    line.textContent = menuLine();
+  }
 }
 
 // The words on a sound button, wherever it is. The picture does the talking
@@ -210,8 +266,9 @@ export function createTitleScreen({ sound, hasSave, onPlay, onNewGame } = {}) {
 
   card.appendChild(buildHowTo('title-howto'));
 
-  // The one line that the four cards above do not cover.
-  card.appendChild(div('title-esc', 'Press Esc at any time for the menu'));
+  // The one line that the four cards above do not cover. On a phone it talks
+  // about the ☰ button instead of the Esc key (see setHowToTouch above).
+  card.appendChild(div('title-esc', menuLine()));
 
   document.body.appendChild(root);
 

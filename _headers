@@ -1,0 +1,21 @@
+# Cloudflare Pages reads this file and sends these headers with every file it
+# serves. It is not part of the game: delete it and the ranch still works, it is
+# just served with Cloudflare's own defaults.
+#
+# WHY no-cache. The game is plain index.html plus /js/*.js, and none of those
+# names ever change when the code inside them does. Without this, a phone that
+# played yesterday would happily keep playing yesterday's game - and worse, it
+# could end up with a new index.html and an old main.js, which is the kind of
+# half-and-half that breaks in a way nobody can explain.
+#
+# "no-cache" does NOT mean "do not keep a copy". It means "keep it, but ask me
+# first" - so a phone with nothing new to fetch still starts instantly, and a
+# phone with something new to fetch gets it. That is exactly what a small game
+# that is still being changed wants.
+#
+# nosniff tells the browser to believe the file type it was given rather than
+# guessing from the contents, which is one less thing that can ever go odd.
+
+/*
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff

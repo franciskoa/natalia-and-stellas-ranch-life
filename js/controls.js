@@ -13,6 +13,13 @@
 //   setEnabled(bool)       - false while a menu is open: the keys and the
 //                            mouse drag are ignored (and any held key is
 //                            forgotten), but the camera still follows along
+//   setTouchMove(x, y)     - Phase 8: push the subject along WITHOUT a keyboard.
+//                            x is sideways (+1 is right), y is forwards (+1 is
+//                            away from the camera), and anything in between
+//                            works: a thumb that has only half pushed the
+//                            on-screen joystick over gives a half-length vector
+//                            and she walks at half speed. js/touch.js is the
+//                            only caller. setTouchMove(0, 0) means "let go".
 //   snapCamera()           - put the camera straight behind the subject now,
 //                            with no gliding (main.js uses it after a save
 //                            file has moved Natalia somewhere else)
@@ -243,6 +250,20 @@ export function createControls(player, camera, domElement, bounds) {
   let lastPointerY = 0;
   let moving = false;
 
+  // WHICH FINGER (or mouse) is doing the looking. On a phone there can easily
+  // be two fingers on the glass at once - one walking, one looking - and every
+  // pointer event carries its own pointerId. We remember the id of the one that
+  // started the look-drag and ignore every other one, so a second finger landing
+  // on the canvas can never yank the camera sideways.
+  //   null = nobody is dragging
+  let dragPointerId = null;
+
+  // The on-screen joystick's push, as set by js/touch.js: sideways and
+  // forwards, each from -1 to 1. Both stay 0 on a keyboard-and-mouse machine,
+  // and the movement code below then behaves exactly as it always did.
+  let touchMoveX = 0;
+  let touchMoveY = 0;
+
   // While the barn menu is open the controls are switched off: the camera
   // still follows her, but held keys and mouse drags are ignored.
   let enabled = true;
@@ -277,11 +298,19 @@ export function createControls(player, camera, domElement, bounds) {
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
 
-  // --- mouse: hold the left button and drag to look around ------------------
+  // --- mouse or finger: hold and drag to look around ------------------------
+  // The very same three handlers do the mouse on a laptop and the "right thumb"
+  // on a phone: a touch arrives as a pointer event like any other. The only
+  // extra care a phone needs is the pointerId checks, so that the SECOND finger
+  // on the glass (the one on the joystick) is left well alone.
   function onPointerDown(event) {
     if (!enabled) return;                  // no looking around from a menu
     if (event.button !== 0) return;
+    // Already looking with another finger? Then this is somebody's second
+    // thumb; it must not take the drag over, or the camera would jump.
+    if (dragPointerId !== null) return;
     dragging = true;
+    dragPointerId = event.pointerId;
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
     // Capturing the pointer keeps the drag working even if the mouse slides
@@ -296,6 +325,8 @@ export function createControls(player, camera, domElement, bounds) {
   function onPointerMove(event) {
     if (!enabled) return;
     if (!dragging) return;
+    // Only the finger that started the drag may turn the camera.
+    if (event.pointerId !== dragPointerId) return;
     const dx = event.clientX - lastPointerX;
     const dy = event.clientY - lastPointerY;
     lastPointerX = event.clientX;
@@ -307,7 +338,11 @@ export function createControls(player, camera, domElement, bounds) {
   }
 
   function onPointerUp(event) {
+    // A finger lifting off is only the end of the drag if it is the finger that
+    // STARTED it. Lifting the joystick thumb must not stop the looking.
+    if (dragPointerId !== null && event.pointerId !== dragPointerId) return;
     dragging = false;
+    dragPointerId = null;
     if (domElement.releasePointerCapture && event.pointerId !== undefined) {
       try {
         domElement.releasePointerCapture(event.pointerId);
@@ -374,6 +409,8 @@ export function createControls(player, camera, domElement, bounds) {
     // again the moment it closes.
     if (!enabled) {
       held.clear();
+      touchMoveX = 0;
+      touchMoveY = 0;
       moving = false;
       return;
     }
@@ -388,6 +425,14 @@ export function createControls(player, camera, domElement, bounds) {
       if (LEFT_KEYS.includes(code)) rightInput -= 1;
     }
 
+    // ...and then the on-screen joystick, which pushes in exactly the same two
+    // directions. It is ADDED to the keys rather than replacing them, so a
+    // laptop with a touchscreen can use either at any moment without the two
+    // ever fighting - and on a machine with no touch at all both are 0 and this
+    // line does nothing whatsoever.
+    forwardInput += touchMoveY;
+    rightInput += touchMoveX;
+
     moving = forwardInput !== 0 || rightInput !== 0;
     if (!moving) return;
 
@@ -401,14 +446,24 @@ export function createControls(player, camera, domElement, bounds) {
     let moveX = forwardX * forwardInput + rightX * rightInput;
     let moveZ = forwardZ * forwardInput + rightZ * rightInput;
 
-    // Normalise, so moving diagonally is not faster than moving straight.
+    // Point the movement in the right direction, and decide how HARD it is
+    // being pushed.
+    //
+    // Dividing by "length" is the old normalise: it is what stops walking
+    // diagonally (W and D together, length 1.41) being faster than walking
+    // straight. Multiplying by "strength" is the new bit, and it only ever
+    // matters to the joystick: a thumb pushed half way over gives a vector
+    // 0.5 long, so she walks at half speed. Every keyboard press gives a
+    // vector at least 1 long, strength is capped at 1, and so the keys behave
+    // exactly as they always have, down to the last decimal place.
     const length = Math.hypot(moveX, moveZ);
     if (length < 0.0001) {
       moving = false;
       return;
     }
-    moveX /= length;
-    moveZ /= length;
+    const strength = Math.min(1, length);
+    moveX = (moveX / length) * strength;
+    moveZ = (moveZ / length) * strength;
 
     const position = subject.object.position;
     position.x += moveX * subject.speed * dt;
@@ -513,9 +568,26 @@ export function createControls(player, camera, domElement, bounds) {
     enabled = !!value;
     if (!enabled) {
       held.clear();
+      touchMoveX = 0;
+      touchMoveY = 0;
       moving = false;
       dragging = false;
+      dragPointerId = null;
     }
+  }
+
+  // setTouchMove - the on-screen joystick's push, from js/touch.js.
+  //   x  sideways, -1 (left) to 1 (right)
+  //   y  forwards, -1 (backwards) to 1 (away from the camera)
+  // It is a SETTING, not an event: touch.js writes the thumb's position here
+  // every time it moves and writes 0, 0 when the thumb is lifted.
+  function setTouchMove(x, y) {
+    // Anything silly (a NaN from a half-finished gesture) counts as "let go",
+    // so nobody can be pushed off across the field by a stray number.
+    const nextX = Number(x);
+    const nextY = Number(y);
+    touchMoveX = Number.isFinite(nextX) ? Math.max(-1, Math.min(1, nextX)) : 0;
+    touchMoveY = Number.isFinite(nextY) ? Math.max(-1, Math.min(1, nextY)) : 0;
   }
 
   // The same two spot helpers as above, but with this ranch's bounds already
@@ -562,6 +634,7 @@ export function createControls(player, camera, domElement, bounds) {
     setSubject,
     getSubject,
     setEnabled,
+    setTouchMove,
     snapCamera,
     orbit,
     addObstacle,

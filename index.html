@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <!-- viewport-fit=cover lets the game fill a phone screen right to the edges,
+       under the notch and the home bar. The controls then use the safe-area
+       insets further down to keep themselves clear of both. -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>Natalia and Stella's Ranch Life</title>
 
   <!-- What a search engine, a chat app or a phone's "add to home screen" shows
@@ -29,18 +33,49 @@
       height: 100%;
       overflow: hidden;
       background: #87ceeb;
+      /* Phones: no rubber-band bounce and no pull-to-refresh when a thumb
+         drags past the edge of the picture, and no "helpful" text zooming. */
+      overscroll-behavior: none;
+      -webkit-text-size-adjust: 100%;
+      -webkit-tap-highlight-color: transparent;
     }
 
     canvas {
       display: block; /* removes the tiny gap under an inline canvas */
+      /* A drag on the picture turns the camera and nothing else: no scrolling,
+         no pinch-zoom, no double-tap zoom, no long-press "copy" bubble. */
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* Every button in the game reacts to the FIRST tap. (Without this a phone
+       waits a third of a second to see whether a second tap is coming, which
+       makes the whole game feel broken.) */
+    button {
+      touch-action: manipulation;
+    }
+
+    /* The panels are the one thing that IS allowed to scroll under a thumb -
+       up and down only, never sideways, and never past their own ends. */
+    .barn-panel,
+    #title-screen,
+    .barn-choices-scroll {
+      touch-action: pan-y;
+      overscroll-behavior: contain;
     }
 
     /* Small, quiet controls list pinned in the bottom-left corner.
        It should read as a note in the margin, not as part of the game. */
+    /* Every fixed corner of the screen below adds the phone's SAFE AREA to its
+       usual distance from the edge: env(safe-area-inset-left) and friends are
+       how far in the rounded corners, the notch and the home bar reach. On a
+       laptop they are all 0, so nothing moves by so much as a pixel. */
     #hint {
       position: fixed;
-      left: 12px;
-      bottom: 12px;
+      left: calc(env(safe-area-inset-left, 0px) + 12px);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
       max-width: 40vw;
       padding: 6px 10px;
       border-radius: 8px;
@@ -63,8 +98,8 @@
        purpose: a quiet note in the margin, never part of the game. */
     #hud {
       position: fixed;
-      left: 12px;
-      top: 12px;
+      left: calc(env(safe-area-inset-left, 0px) + 12px);
+      top: calc(env(safe-area-inset-top, 0px) + 12px);
       padding: 6px 10px;
       border-radius: 8px;
       background: rgba(20, 24, 30, 0.55);
@@ -928,8 +963,8 @@
        and a little air underneath). */
     #saved {
       position: fixed;
-      right: 14px;
-      top: 62px;
+      right: calc(env(safe-area-inset-right, 0px) + 14px);
+      top: calc(env(safe-area-inset-top, 0px) + 62px);
       padding: 5px 10px;
       border-radius: 8px;
       background: rgba(20, 24, 30, 0.55);
@@ -1402,8 +1437,8 @@
        ----------------------------------------------------------------- */
     #top-buttons {
       position: fixed;
-      right: 10px;
-      top: 10px;
+      right: calc(env(safe-area-inset-right, 0px) + 10px);
+      top: calc(env(safe-area-inset-top, 0px) + 10px);
       display: flex;
       gap: 8px;
       z-index: 6;
@@ -1462,15 +1497,15 @@
          and 🔊 buttons, where there is nothing else to bump into. */
       #compass-badge {
         left: auto;
-        right: 10px;
-        top: 62px;
+        right: calc(env(safe-area-inset-right, 0px) + 10px);
+        top: calc(env(safe-area-inset-top, 0px) + 62px);
         transform: none;
       }
 
       /* ...which is where the "Saved" note used to be, so that drops another
          notch, to just under the compass. */
       #saved {
-        top: 116px;
+        top: calc(env(safe-area-inset-top, 0px) + 116px);
       }
 
       /* And the second HUD line gets more of the screen before it wraps: at
@@ -1541,6 +1576,265 @@
          "Press E to ..." prompt can sit lower and out of the way. */
       #prompt { bottom: 74px; font-size: 15px; }
       #message { top: 58px; font-size: 15px; }
+    }
+
+    /* =================================================================
+       PHASE 8 PART 2 - THE THUMB CONTROLS
+       Everything below is for phones and tablets, and none of it appears
+       at all on a laptop with a mouse: js/touch.js only adds the class
+       that switches it on once it is sure the screen is being touched
+       (or once ?touch=1 has asked for it).
+
+       The shape of it, on a phone held sideways:
+
+         +----------------------------------------------+
+         | numbers                            ☰  🔊     |
+         |                                              |
+         |            (drag anywhere here to look)      |
+         |                                              |
+         |                              [ Feed Biscuit ]|
+         |   (o)                     [  Ride Biscuit   ]|
+         +----------------------------------------------+
+            ^ thumb walks                  ^ thumb does things
+       ================================================================= */
+
+    /* The sheet the thumb controls live on. It covers the whole screen but
+       takes no taps of its own - only the walking strip and the buttons
+       inside it do - so a drag anywhere else falls straight through to the
+       picture underneath and turns the camera. */
+    #touch-ui {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      display: none;                 /* until touch.js says otherwise */
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      font-family: var(--round-font);
+      /* Above the game and the numbers, BELOW the panels (which are 10), so a
+         thumb button can never float over the barn menu. */
+      z-index: 8;
+    }
+
+    /* Two classes have to agree before anything is shown: "touch-on" (this is
+       a touch device) and "visible" (there is nothing in the way right now). */
+    #touch-ui.touch-on.visible {
+      display: block;
+    }
+
+    /* The left-hand strip the joystick may appear in. It is invisible - it is
+       a place, not a thing - and js/touch.js sets its width and its top edge. */
+    .touch-stick-zone {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      pointer-events: auto;
+      touch-action: none;            /* a push here is never a scroll */
+      background: transparent;
+    }
+
+    /* The two rings: the faint one that waits in the corner showing where to
+       put a thumb, and the real one that appears under the thumb itself.
+       Both are 108px across, which is twice the 54px reach js/touch.js uses. */
+    .touch-stick-rest,
+    .touch-stick {
+      position: fixed;
+      width: 108px;
+      height: 108px;
+      box-sizing: border-box;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .touch-stick-rest {
+      left: calc(env(safe-area-inset-left, 0px) + 20px);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+      border: 3px dashed rgba(255, 255, 255, 0.38);
+      background: rgba(20, 24, 30, 0.14);
+    }
+
+    /* A small dot in the middle of the resting ring, so it reads as a joystick
+       rather than as a hole in the screen. */
+    .touch-stick-rest::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.34);
+      transform: translate(-50%, -50%);
+    }
+
+    /* The live ring. js/touch.js sets left/top to wherever the thumb landed;
+       the translate is what centres it on that spot. */
+    .touch-stick {
+      border: 3px solid rgba(255, 255, 255, 0.62);
+      background: rgba(20, 24, 30, 0.26);
+      transform: translate(-50%, -50%);
+    }
+
+    .touch-stick-rest.visible,
+    .touch-stick.visible {
+      opacity: 1;
+    }
+
+    /* The pale blob that follows the thumb about inside the ring. */
+    .touch-stick-thumb {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+      transform: translate(-50%, -50%);
+    }
+
+    /* -----------------------------------------------------------------
+       THE ACTION BUTTONS, bottom right - what the E and F keys do on a
+       keyboard. They are only ever on the screen when there is genuinely
+       something to do, and they say what that thing IS: "Ride Biscuit",
+       "Pick the corn", "Trade with Mrs. Garcia".
+       ----------------------------------------------------------------- */
+    .touch-actions {
+      position: absolute;
+      right: calc(env(safe-area-inset-right, 0px) + 14px);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      max-width: 56vw;
+    }
+
+    .touch-action {
+      pointer-events: auto;
+      max-width: 100%;
+      font-family: var(--round-font);
+      font-weight: 800;
+      line-height: 1.15;
+      text-align: center;
+      border: none;
+      border-radius: 40px;           /* round ends: it is a fat pill */
+      cursor: pointer;
+    }
+
+    /* The big one - whatever E would do. "order: 2" puts it at the BOTTOM of
+       the little stack, which is where the thumb already is. */
+    .touch-action-main {
+      order: 2;
+      min-width: 84px;
+      min-height: 72px;
+      padding: 10px 22px;
+      font-size: 18px;
+      color: #1f2c14;
+      background: linear-gradient(180deg, #a5d95c 0%, #7cb832 100%);
+      box-shadow: 0 5px 0 #5e9021, 0 8px 18px rgba(0, 0, 0, 0.25);
+    }
+
+    /* The second one - whatever F would do - sits above it, a size down and a
+       different colour, so the two are never muddled at a glance. */
+    .touch-action-second {
+      order: 1;
+      min-width: 76px;
+      min-height: 58px;
+      padding: 8px 18px;
+      font-size: 15px;
+      color: #3a2a12;
+      background: linear-gradient(180deg, #ffd270 0%, #ffb300 100%);
+      box-shadow: 0 4px 0 #c98a00, 0 8px 16px rgba(0, 0, 0, 0.22);
+    }
+
+    /* Pressed in, like a real button. */
+    .touch-action:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+    }
+
+    /* -----------------------------------------------------------------
+       "Turn your phone sideways" - a suggestion, never a wall. It shows
+       once, for seven seconds, only while the phone is upright, and one
+       tap on the ✕ sends it away for good.
+       ----------------------------------------------------------------- */
+    .touch-rotate {
+      position: absolute;
+      left: 50%;
+      /* High enough to clear both the joystick ring (which follows the thumb
+         about) and the round buttons in the other corner. */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 215px);
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 82vw;
+      padding: 8px 8px 8px 14px;
+      border-radius: 14px;
+      background: rgba(20, 24, 30, 0.74);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .touch-rotate.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .touch-rotate-close {
+      pointer-events: auto;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      font: inherit;
+      font-size: 14px;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.16);
+      border: none;
+      border-radius: 9px;
+      cursor: pointer;
+    }
+
+    /* -----------------------------------------------------------------
+       WHAT GOES AWAY ON A TOUCH DEVICE
+       Two bits of the screen are about keys, and a phone has none: the
+       "Move: W A S D" note in the bottom-left corner, and the "E: Ride
+       Biscuit" prompt above it. The round buttons say all of that in
+       their own words, right where the thumb already is.
+
+       The little messages ("You picked 3 corn!") are NOT in this list and
+       never should be - they are the game talking back.
+       ----------------------------------------------------------------- */
+    body.touch-mode #hint,
+    body.touch-mode #prompt {
+      display: none;
+    }
+
+    /* A phone held sideways has only about 390px of height, so the two
+       buttons lose a few pixels to leave the picture room to breathe. */
+    @media (max-height: 520px) {
+      .touch-action-main { min-height: 62px; font-size: 16px; padding: 8px 18px; }
+      .touch-action-second { min-height: 50px; font-size: 14px; padding: 6px 16px; }
+      .touch-actions { gap: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+      .touch-stick-rest { bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); }
+    }
+
+    /* The front page keeps clear of the notch and the home bar too. */
+    #title-screen {
+      padding-left: calc(env(safe-area-inset-left, 0px) + 16px);
+      padding-right: calc(env(safe-area-inset-right, 0px) + 16px);
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
     }
   </style>
 
