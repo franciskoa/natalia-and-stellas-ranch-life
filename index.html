@@ -2,10 +2,62 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Natalia and Stella's Ranch Life</title>
+
+  <style>
+    /* Fill the whole browser window, no scrollbars, no white flash:
+       the page background is the same sky blue the 3D scene uses. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #87ceeb;
+    }
+
+    canvas {
+      display: block; /* removes the tiny gap under an inline canvas */
+    }
+
+    /* Friendly hint box in the bottom-left corner. Big and easy to read. */
+    #hint {
+      position: fixed;
+      left: 20px;
+      bottom: 20px;
+      max-width: 60vw;
+      padding: 14px 20px;
+      border-radius: 18px;
+      background: rgba(20, 24, 30, 0.62);
+      color: #ffffff;
+      font-family: "Comic Sans MS", "Trebuchet MS", "Segoe UI Rounded", Verdana, sans-serif;
+      font-size: 22px;
+      line-height: 1.35;
+      font-weight: bold;
+      text-shadow: 0 2px 3px rgba(0, 0, 0, 0.45);
+      pointer-events: none; /* clicks pass through to the game */
+      user-select: none;
+    }
+  </style>
+
+  <!-- Import map: tells the browser where the bare name "three" points to.
+       No npm and no bundler needed - the browser loads it straight from the CDN. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
-  <!-- Placeholder. Phase 1 will replace this with the real game page. -->
-  <p>Natalia and Stella's Ranch Life — setup complete. Phase 1 not started yet.</p>
+  <!-- On-screen controls hint, kept short and easy to read. -->
+  <div id="hint">
+    Walk: W A S D or the arrow keys<br>
+    Look around: hold the mouse button and drag
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

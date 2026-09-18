@@ -24,7 +24,7 @@ No build tools, no npm install.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | Walk around | not started |
+| 1 | Walk around | done — ranch yard, house, barn, horse, Natalia + Stella, WASD/arrows, drag-to-look camera |
 | 2 | Feed a horse | not started |
 | 3 | Ride a horse | not started |
 | 4 | Multiple horses + customization + save | not started |
