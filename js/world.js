@@ -1,4 +1,5 @@
-// world.js - builds the ranch scenery: ground, house, barn, horse, fence, trees.
+// world.js - builds the ranch scenery: ground, house, barn, fence, trees.
+// (The horse lives in its own file now: horse.js.)
 //
 // Everything is made from simple Three.js shapes (boxes, cylinders, cones) with
 // flat colours, so it stays low-poly and runs fast on a normal laptop.
@@ -129,55 +130,6 @@ function buildBarn(x, z) {
 }
 
 // ---------------------------------------------------------------------------
-// HORSE - all boxes. The group origin is on the ground between its hooves,
-// so horse.position.set(x, 0, z) always puts the feet flat on the grass.
-// ---------------------------------------------------------------------------
-function buildHorse(x, z) {
-  const horse = new THREE.Group();
-  horse.name = 'horse';
-
-  // Four legs with darker hooves. Front legs at z = +0.7, back legs at z = -0.7.
-  for (const sx of [-0.33, 0.33]) {
-    for (const sz of [0.7, -0.7]) {
-      horse.add(box(0.22, 1.0, 0.22, sx, 0.75, sz, M.horseCoat)); // leg
-      horse.add(box(0.28, 0.26, 0.3, sx, 0.13, sz, M.horseDark)); // hoof
-    }
-  }
-
-  // Barrel of the body, long in the Z direction.
-  horse.add(box(0.9, 0.85, 2.1, 0, 1.6, 0, M.horseCoat));
-
-  // Neck: a box tilted forward so it rises towards the head.
-  const neck = box(0.55, 1.0, 0.55, 0, 2.05, 0.85, M.horseCoat);
-  neck.rotation.x = 0.45;
-  horse.add(neck);
-
-  // Mane: a thin dark slab lying along the back of the neck.
-  const mane = box(0.14, 1.05, 0.2, 0, 2.05, 0.6, M.horseDark);
-  mane.rotation.x = 0.45;
-  horse.add(mane);
-
-  // Head, tipped slightly nose-down.
-  const head = box(0.45, 0.45, 0.95, 0, 2.62, 1.25, M.horseCoat);
-  head.rotation.x = 0.35;
-  horse.add(head);
-
-  // Two small ears on top of the head.
-  horse.add(box(0.12, 0.24, 0.12, -0.14, 2.92, 1.02, M.horseCoat));
-  horse.add(box(0.12, 0.24, 0.12, 0.14, 2.92, 1.02, M.horseCoat));
-
-  // Tail hanging off the back.
-  const tail = box(0.18, 0.8, 0.18, 0, 1.75, -1.1, M.horseDark);
-  tail.rotation.x = 0.35;
-  horse.add(tail);
-
-  horse.position.set(x, 0, z);
-  horse.rotation.y = -0.35; // turned a little so it looks towards the camera
-  horse.userData = { kind: 'horse' };
-  return horse;
-}
-
-// ---------------------------------------------------------------------------
 // FENCE - posts plus two long rails. One "run" is one straight stretch,
 // described by where it starts and where it ends on the ground.
 // ---------------------------------------------------------------------------
@@ -300,11 +252,9 @@ export function buildWorld(scene) {
 
   const house = buildHouse(-12, -8);
   const barn = buildBarn(14, -10);
-  const horse = buildHorse(6, 4);
 
   scene.add(house);
   scene.add(barn);
-  scene.add(horse);
   scene.add(buildFence());
   scene.add(buildTrees());
   scene.add(buildProps());
@@ -313,5 +263,5 @@ export function buildWorld(scene) {
   // the player position to these numbers so she never walks off the ground.
   const bounds = { minX: -60, maxX: 60, minZ: -60, maxZ: 60 };
 
-  return { ground, house, barn, horse, bounds };
+  return { ground, house, barn, bounds };
 }

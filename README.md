@@ -25,7 +25,7 @@ No build tools, no npm install.
 | Phase | What | Status |
 |---|---|---|
 | 1 | Walk around | done — ranch yard, house, barn, horse, Natalia + Stella, WASD/arrows, drag-to-look camera |
-| 2 | Feed a horse | not started |
+| 2 | Feed a horse | done — hunger bar above the horse drains over ~90 s, walk up and press E to feed |
 | 3 | Ride a horse | not started |
 | 4 | Multiple horses + customization + save | not started |
 | 5 | Chickens, coins, market stall, store | not started |

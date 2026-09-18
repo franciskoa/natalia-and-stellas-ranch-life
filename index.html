@@ -38,6 +38,58 @@
       pointer-events: none; /* clicks pass through to the game */
       user-select: none;
     }
+
+    /* The "Press E to ..." prompt. It sits low and in the middle of the
+       screen, just above the hint box, where the player is already looking.
+       It is invisible until the game adds the "visible" class to it. */
+    #prompt {
+      position: fixed;
+      left: 50%;
+      /* Clear of the three-line hint box in the bottom-left corner. */
+      bottom: 150px;
+      transform: translateX(-50%);
+      padding: 12px 26px;
+      border-radius: 18px;
+      background: rgba(20, 24, 30, 0.72);
+      color: #ffffff;
+      font-family: "Comic Sans MS", "Trebuchet MS", "Segoe UI Rounded", Verdana, sans-serif;
+      font-size: 26px;
+      font-weight: bold;
+      text-align: center;
+      text-shadow: 0 2px 3px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      user-select: none;
+      opacity: 0;                       /* hidden by default */
+      transition: opacity 0.15s ease;   /* a quick, gentle fade */
+    }
+
+    /* The little feedback message, e.g. "Yum! Biscuit is happy."
+       Same idea as the prompt, but up at the top and in a warm colour. */
+    #message {
+      position: fixed;
+      left: 50%;
+      top: 40px;
+      transform: translateX(-50%);
+      padding: 12px 26px;
+      border-radius: 18px;
+      background: rgba(120, 140, 40, 0.82); /* warm yellow-green */
+      color: #ffffff;
+      font-family: "Comic Sans MS", "Trebuchet MS", "Segoe UI Rounded", Verdana, sans-serif;
+      font-size: 26px;
+      font-weight: bold;
+      text-align: center;
+      text-shadow: 0 2px 3px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      user-select: none;
+      opacity: 0;                       /* hidden by default */
+      transition: opacity 0.35s ease;   /* fades out a little more slowly */
+    }
+
+    /* The game adds this class to show either box, and takes it away to hide it. */
+    #prompt.visible,
+    #message.visible {
+      opacity: 1;
+    }
   </style>
 
   <!-- Import map: tells the browser where the bare name "three" points to.
@@ -55,8 +107,15 @@
   <!-- On-screen controls hint, kept short and easy to read. -->
   <div id="hint">
     Walk: W A S D or the arrow keys<br>
-    Look around: hold the mouse button and drag
+    Look around: hold the mouse button and drag<br>
+    Feed: walk up to the horse and press E
   </div>
+
+  <!-- "Press E to ..." appears here when Natalia is close to something. -->
+  <div id="prompt"></div>
+
+  <!-- Short feedback, like "Yum! Biscuit is happy.", flashes up here. -->
+  <div id="message"></div>
 
   <script type="module" src="./js/main.js"></script>
 </body>
